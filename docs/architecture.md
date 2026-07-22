@@ -196,37 +196,39 @@ no separate producer process needed for the self-contained path:
 JS  ──pushImage(dataURL)──▶  N-API  ──▶  OverlayWindow render
 ```
 
-For the **isolated worker** path (see §6), frames stream from the sandboxed
-child process over the secure channel and are rendered into the same overlay.
+For the **worker process** path (see §6), framed bytes stream from the helper;
+the Electron main process decides whether to forward them to an overlay.
 
 ---
 
-## 6. Secure isolated channel design
+## 6. Verified worker channel design
 
-Spawns a child process for sensitive work (automation, credential handling,
-untrusted code execution) and streams results back over a verified channel.
+Spawns one dedicated helper and streams length-prefixed stdout frames over a
+private inherited pipe. The executable path is verified before the child
+resumes. This deliberately does not claim to sandbox hostile code.
 
 ```
 ┌──────────────┐                         ┌──────────────────┐
-│ Electron main│   verified IPC channel   │  sandboxed child │
-│  (host)      │◀────────────────────────▶│  process (worker)│
-│              │   mac: NSXPCConnection   │                  │
-│              │   win: named pipe         │  restricted token│
+│ Electron main│   private framed pipe     │  helper process  │
+│  (host)      │◀─────────────────────────│  (worker)        │
+│              │  4-byte LE length + data │  restricted on  │
+│              │                           │  Windows        │
 └──────┬───────┘                         └──────────────────┘
        │
-       │  spawn(executablePath) → pid
-       │  verify(pid, executablePath) → bool   # audit-token / path check
-       │  wasTerminatedByPrivacy() → bool      # privacy-permission death?
+       │  spawn(executablePath, arguments?) → pid
+       │  verify(pid, executablePath) → bool
+       │  terminate() → bool
        ▼
    overlay.pushImage(...)  # stream worker frames into an overlay
 ```
 
-### Security model
-- **macOS**: `NSXPCConnection` with audit-token verification — only the
-  expected child PID with the expected executable path may connect. Entitlements
-  scope the child's capabilities.
-- **Windows**: `CreateProcess` with a restricted token; named pipe with
-  `GetNamedPipeClientProcessId` + full-path verification before accepting data.
+### Trust model
+- **macOS**: `posix_spawn` starts suspended; `proc_pidpath` must match the
+  canonical requested executable before it resumes.
+- **Windows**: `CreateProcessAsUser` uses a restricted token and job object;
+  `QueryFullProcessImageName` must match before the primary thread resumes.
+- The pipe write handle is inherited only by that child. Restricted tokens and
+  separate processes reduce blast radius but are not a hostile-code sandbox.
 
 ---
 
@@ -241,8 +243,8 @@ untrusted code execution) and streams results back over a verified channel.
 │  Frontmost window     │  NSWorkspace.frontmost │  GetForegroundWindow        │
 │  App icon             │  NSWorkspace.icon      │  SHGetFileInfo / ExtractIcon│
 │  File drag-out        │  NSDraggingSource      │  IDropSource + IDataObject  │
-│  Secure IPC           │  NSXPCConnection       │  Named pipe (verified PID) │
-│  Isolated process     │  posix_spawn           │  CreateProcess (restr. token)│
+│  Worker channel       │  inherited stdout pipe │  inherited stdout pipe    │
+│  Worker process       │  posix_spawn + path    │  restricted token + job   │
 └──────────────────────┴────────────────────────┴─────────────────────────────┘
 ```
 

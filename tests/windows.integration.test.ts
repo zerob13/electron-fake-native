@@ -1,3 +1,5 @@
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -7,6 +9,8 @@ import {
   windows,
   type SystemWindow,
 } from '../js/index.js'
+
+const workerPath = resolve(import.meta.dirname, 'fixtures/framed-worker.mjs')
 
 function expectWindowShape(window: SystemWindow): void {
   expect(Number.isSafeInteger(window.id)).toBe(true)
@@ -57,6 +61,9 @@ describe('JavaScript boundary validation', () => {
 
   it('rejects relative executable and application paths', () => {
     expect(() => secureChannel.spawn('worker')).toThrow('absolute path')
+    expect(() =>
+      secureChannel.spawn(process.execPath, [42 as unknown as string]),
+    ).toThrow('arguments[0] must be a string')
     expect(() => apps.icon('Safari.app')).toThrow('absolute path')
   })
 })
@@ -75,5 +82,41 @@ describe('overlay lifecycle integration', () => {
 
     expect(overlay.stop()).toBe(true)
     expect(overlay.stop()).toBe(true)
+  })
+})
+
+describe('secure channel integration', () => {
+  it('verifies the executable and decodes framed worker output', async () => {
+    const data = new Promise<Buffer>((resolvePromise) => {
+      secureChannel.once('data', resolvePromise)
+    })
+    const exit = new Promise<number>((resolvePromise) => {
+      secureChannel.once('exit', resolvePromise)
+    })
+
+    const pid = await secureChannel.spawn(process.execPath, [workerPath])
+    expect(pid).not.toBeNull()
+    expect(await secureChannel.verify(pid!, process.execPath)).toBe(true)
+    expect(await secureChannel.spawn(process.execPath, [workerPath])).toBeNull()
+    await expect(data).resolves.toEqual(Buffer.from('nativekit-worker'))
+    await expect(exit).resolves.toBe(0)
+    expect(secureChannel.terminate()).toBe(true)
+    expect(secureChannel.wasTerminatedByPrivacy()).toBe(false)
+  })
+
+  it('terminates an active worker', async () => {
+    const data = new Promise<Buffer>((resolvePromise) => {
+      secureChannel.once('data', resolvePromise)
+    })
+    const exit = new Promise<number>((resolvePromise) => {
+      secureChannel.once('exit', resolvePromise)
+    })
+
+    expect(
+      await secureChannel.spawn(process.execPath, [workerPath, '--wait']),
+    ).not.toBeNull()
+    await data
+    expect(secureChannel.terminate()).toBe(true)
+    await expect(exit).resolves.toEqual(expect.any(Number))
   })
 })

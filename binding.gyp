@@ -5,6 +5,7 @@
       "sources": [
         "src/binding.cpp",
         "src/common/event_callback.cc",
+        "src/ipc/secure_channel.cc",
         "src/overlay/overlay_manager.cc",
         "src/windows/window_query.cc"
       ],
@@ -21,6 +22,7 @@
         ["OS=='mac'", {
           "sources": [
             "src/common/mac/image_utils.mm",
+            "src/ipc/mac/secure_channel.mm",
             "src/overlay/mac/overlay_window.mm",
             "src/windows/mac/window_query.mm"
           ],
@@ -41,6 +43,7 @@
         ["OS=='win'", {
           "sources": [
             "src/common/win/image_utils.cpp",
+            "src/ipc/win/secure_channel.cpp",
             "src/overlay/win/overlay_window.cpp",
             "src/windows/win/window_query.cpp"
           ],

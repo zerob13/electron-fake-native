@@ -10,8 +10,8 @@ provide or does poorly:
   stacked across all macOS Spaces and the current Windows virtual desktop.
 - **Native window awareness** — enumerate, query, and hit-test system windows to
   build context-aware UI.
-- **Secure isolated IPC** — run sensitive work in a sandboxed child process and
-  stream its output back, with peer identity verification.
+- **Verified worker channel** — run a dedicated helper process and stream
+  length-prefixed output over a private inherited pipe.
 - **App icons** — extract the real OS icon for any installed application.
 - **File drag-out** — start a native file drag from an Electron window into
   Finder / Explorer / any app.
@@ -101,7 +101,7 @@ app.on('will-quit', () => overlay.stop())
 |---|---|---|
 | `overlay` | Floating, always-on-top panel system | P0 — core |
 | `windows` | System window enumeration & query | P0 — core |
-| `secureChannel` | Sandboxed child process + verified IPC | P1 |
+| `secureChannel` | Verified helper process + framed output pipe | P1 |
 | `apps` | Native application icon extraction | P2 |
 | `drag` | Native file drag-out from Electron | P2 |
 | `animation` | Physics-based window animations | Deferred* |
@@ -124,8 +124,8 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 | Frontmost window | NSWorkspace | `GetForegroundWindow` |
 | App icon | NSWorkspace.icon | `SHGetFileInfo` / icon resources |
 | File drag | NSDraggingSource | `IDropSource` / `IDataObject` (OLE) |
-| Secure IPC | NSXPCConnection | Named pipe + restricted child |
-| Isolated process | `posix_spawn` | `CreateProcess` (restricted token) |
+| Worker channel | Inherited pipe + `posix_spawn` | Inherited pipe + restricted token |
+| Peer verification | `proc_pidpath` | `QueryFullProcessImageName` |
 
 ---
 

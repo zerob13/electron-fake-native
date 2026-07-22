@@ -243,31 +243,41 @@ windows at or above `belowId` in z-order.
 
 ## secureChannel
 
-Spawn a sandboxed child process for sensitive work and stream results back over
-a verified channel.
+Spawn one dedicated helper process and stream results from stdout over a private
+inherited pipe. The executable is path-verified before it runs. This is process
+isolation, not a sandbox for hostile code.
+
+Each stdout message is a 4-byte little-endian unsigned payload length followed
+by that many bytes. Frames are limited to 16 MiB, and only one worker may be
+active at a time.
 
 ### Methods
 
-#### `secureChannel.spawn(executablePath: string): Promise<number | null>`
+#### `secureChannel.spawn(executablePath: string, arguments?: string[]): Promise<number | null>`
 
 Launch an isolated worker process. Resolves with the child PID, or `null` on
-failure.
+failure. Arguments are passed directly to the executable without a shell.
 
 ```js
-const pid = await secureChannel.spawn('/path/to/worker')
+const pid = await secureChannel.spawn(process.execPath, [
+  '/absolute/path/to/worker.mjs',
+])
 ```
 
 #### `secureChannel.verify(pid: number, executablePath: string): Promise<boolean>`
 
-Verify that the given PID is running the expected executable path. Use this to
-authenticate an incoming IPC connection (audit-token / path check) before
-trusting its data.
+Verify that the given PID is running the expected executable path. `spawn()`
+performs this check internally before resuming the child.
+
+#### `secureChannel.terminate(): boolean`
+
+Terminate the active worker and close its pipe. Returns `false` if no channel
+has been created. A later `spawn()` call creates a fresh channel.
 
 #### `secureChannel.wasTerminatedByPrivacy(): boolean`
 
-Returns `true` if the last worker termination was caused by a privacy /
-permission gate (e.g. macOS TCC revocation), letting the app show the right
-recovery UX instead of a generic crash.
+Deprecated. Always returns `false`: a generic process exit cannot be reliably
+attributed to macOS TCC, and Windows has no equivalent termination reason.
 
 ### Events
 

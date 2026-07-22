@@ -52,27 +52,26 @@ Development is phased by impact and risk. Each phase is independently shippable.
 
 ## Phase 2 — Secure IPC (P1)
 
-> Isolated, verified inter-process communication for sensitive work (automation,
-  credential handling, untrusted code). Decoupled from but composable with the
-  overlay.
+> Dedicated, path-verified helper process with deterministic framed output.
+  Decoupled from but composable with the overlay. This is not a hostile-code
+  sandbox.
 
 ### Secure Channel (`secureChannel`)
 
-- [ ] Cross-platform `secure_channel.h` interface
-- [ ] macOS:
-  - [ ] `posix_spawn` for child process
-  - [ ] `NSXPCConnection` host + worker protocols
-  - [ ] Audit-token verification — `verify(pid, path)`
-  - [ ] `wasTerminatedByPrivacy()` via TCC / privacy termination signal
-  - [ ] Frame streaming: worker frames → `overlay.pushImage` bridge
-- [ ] Windows:
-  - [ ] `CreateProcess` with restricted token
-  - [ ] Named pipe (verified `GetNamedPipeClientProcessId` + full-path check)
-  - [ ] Privacy-termination detection (job-object / restricted-token exit reason)
-  - [ ] Frame streaming bridge to overlay
-- [ ] Events: `data`, `exit`
+- [x] Cross-platform `secure_channel.h` interface
+- [x] macOS:
+  - [x] `posix_spawn` for child process
+  - [x] Private inherited stdout pipe with 4-byte length framing
+  - [x] Suspended-start path verification — `verify(pid, path)`
+  - [x] Data events for application-controlled overlay forwarding
+- [x] Windows:
+  - [x] `CreateProcessAsUser` with restricted token
+  - [x] Private inherited stdout pipe + full-path verification
+  - [x] Job object lifetime control
+  - [x] Data events for application-controlled overlay forwarding
+- [x] Events: `data`, `exit`
 
-**Deliverable**: sandboxed worker that streams verified frames into an overlay.
+**Deliverable**: verified helper that streams framed payloads to Electron.
 
 ---
 

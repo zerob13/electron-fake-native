@@ -8,6 +8,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(NATIVEKIT_SOURCES
   src/binding.cpp
   src/common/event_callback.cc
+  src/ipc/secure_channel.cc
   src/overlay/overlay_manager.cc
   src/windows/window_query.cc
 )
@@ -20,6 +21,7 @@ if(APPLE)
 
   list(APPEND NATIVEKIT_SOURCES
     src/common/mac/image_utils.mm
+    src/ipc/mac/secure_channel.mm
     src/overlay/mac/overlay_window.mm
     src/windows/mac/window_query.mm
   )
@@ -32,6 +34,7 @@ endif()
 if(WIN32)
   list(APPEND NATIVEKIT_SOURCES
     src/common/win/image_utils.cpp
+    src/ipc/win/secure_channel.cpp
     src/overlay/win/overlay_window.cpp
     src/windows/win/window_query.cpp
   )

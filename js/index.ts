@@ -98,8 +98,9 @@ interface NativeBinding {
   windowsFind(id: number): SystemWindow | null
   windowsAtPoint(point: Point, belowId: number): SystemWindow | null
 
-  secureChannelSpawn(executablePath: string): number | null
+  secureChannelSpawn(executablePath: string, arguments_: string[]): number | null
   secureChannelVerify(pid: number, executablePath: string): boolean
+  secureChannelTerminate(): boolean
   secureChannelWasTerminatedByPrivacy(): boolean
   secureChannelOnData?(callback: (payload: Buffer) => void): void
   secureChannelOnExit?(callback: (code: number) => void): void
@@ -300,10 +301,23 @@ class Windows {
 }
 
 class SecureChannel extends EventEmitter {
-  spawn(executablePath: string): Promise<number | null> {
+  spawn(
+    executablePath: string,
+    arguments_: string[] = [],
+  ): Promise<number | null> {
     assertMainProcess()
     requireAbsolutePath(executablePath, 'executablePath')
-    return Promise.resolve(native.secureChannelSpawn(executablePath))
+    if (!Array.isArray(arguments_)) {
+      throw new TypeError('arguments must be an array')
+    }
+    arguments_.forEach((argument, index) => {
+      if (typeof argument !== 'string') {
+        throw new TypeError(`arguments[${index}] must be a string`)
+      }
+    })
+    return Promise.resolve(
+      native.secureChannelSpawn(executablePath, arguments_),
+    )
   }
 
   verify(pid: number, executablePath: string): Promise<boolean> {
@@ -313,6 +327,12 @@ class SecureChannel extends EventEmitter {
     return Promise.resolve(native.secureChannelVerify(pid, executablePath))
   }
 
+  terminate(): boolean {
+    assertMainProcess()
+    return native.secureChannelTerminate()
+  }
+
+  /** @deprecated Generic process exit status cannot identify privacy denial. */
   wasTerminatedByPrivacy(): boolean {
     assertMainProcess()
     return native.secureChannelWasTerminatedByPrivacy()
