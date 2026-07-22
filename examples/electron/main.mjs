@@ -71,10 +71,13 @@ function attachOverlayHost() {
     traceSmoke('overlay-host:platform-ready')
   }
   traceSmoke('overlay-host:attach-start')
+  traceSmoke('overlay-host:bounds-start')
+  const bounds = mainWindow.getContentBounds()
+  traceSmoke('overlay-host:bounds-ready')
   overlay.attachHost({
     id: hostId,
     title: 'nativekit demo',
-    bounds: mainWindow.getContentBounds(),
+    bounds,
     windowHandle,
     anchor: { edge: 'trailing', offset: 24 },
   })
@@ -337,9 +340,9 @@ function createWindow() {
   mainWindow.on('move', scheduleOverlayHostUpdate)
   mainWindow.once('ready-to-show', () => {
     traceSmoke('window:ready-to-show')
-    attachOverlayHost()
     mainWindow.show()
     traceSmoke('window:shown')
+    setImmediate(attachOverlayHost)
   })
   mainWindow.on('closed', () => {
     if (boundsTimer !== null) clearTimeout(boundsTimer)

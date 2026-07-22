@@ -44,12 +44,18 @@ nativekit.node
 ### CI-driven architecture amendment
 
 The first implementation attempted to embed GTK 3 on Electron's main thread.
-Native x64 and arm64 CI showed that initializing GTK before Chromium violated
-Chromium's initialization order and made later synchronous `BrowserWindow`
-queries deadlock. Initializing it from an Electron callback could deadlock the
-inverse path. The overlay was therefore changed to a dedicated XCB event thread
-with a separate X11 connection. GdkPixbuf remains for display-independent image
-decode and encode; the addon no longer initializes or links GTK.
+Native x64 and arm64 CI exposed Chromium's ordering warning because the addon
+initialized GTK before Chromium called `gtk_disable_setlocale()`. Sharing GTK's
+process-global initialization and main context with Electron therefore had no
+safe ownership boundary. The overlay was changed to a dedicated XCB event
+thread with a separate X11 connection. GdkPixbuf remains for
+display-independent image decode and encode; the addon no longer initializes
+or links GTK.
+
+The same CI trace separately found that the smoke demo queried
+`BrowserWindow.getContentBounds()` synchronously while its `show: false` X11
+window was still unmapped. The demo now maps the window and returns to the event
+loop before attaching the overlay host.
 
 ### Window queries
 
