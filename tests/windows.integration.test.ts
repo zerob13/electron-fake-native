@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   apps,
+  drag,
   overlay,
   secureChannel,
   windows,
@@ -120,3 +121,40 @@ describe('secure channel integration', () => {
     await expect(exit).resolves.toEqual(expect.any(Number))
   })
 })
+
+describe('application icon integration', () => {
+  it('extracts small and medium PNG data URLs', async () => {
+    const small = await apps.icon(process.execPath, { size: 'small' })
+    const medium = await apps.icon(process.execPath, { size: 'medium' })
+
+    expect(pngSize(small)).toEqual([16, 16])
+    expect(pngSize(medium)).toEqual([32, 32])
+  })
+
+  it('returns null for a missing application', async () => {
+    await expect(
+      apps.icon(resolve(import.meta.dirname, 'fixtures/missing.app')),
+    ).resolves.toBeNull()
+  })
+})
+
+describe('drag boundary integration', () => {
+  it('rejects an invalid native window handle', async () => {
+    await expect(
+      drag.start({
+        files: [workerPath],
+        windowHandle: Buffer.alloc(8),
+        position: { x: 0, y: 0 },
+      }),
+    ).rejects.toThrow('windowHandle is invalid')
+  })
+})
+
+function pngSize(dataUrl: string | null): [number, number] | null {
+  if (dataUrl === null) return null
+  const png = Buffer.from(dataUrl.split(',', 2)[1], 'base64')
+  expect(png.subarray(0, 8)).toEqual(
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+  )
+  return [png.readUInt32BE(16), png.readUInt32BE(20)]
+}

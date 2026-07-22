@@ -82,16 +82,16 @@ Development is phased by impact and risk. Each phase is independently shippable.
 
 ### App Icons (`apps`)
 
-- [ ] macOS: `NSWorkspace.shared.icon(forFile:)` → PNG data URL
-- [ ] Windows: `SHGetFileInfo` / `ExtractIconEx` → PNG data URL
-- [ ] Size variants: `small`, `medium`
+- [x] macOS: `NSWorkspace.shared.icon(forFile:)` → PNG data URL
+- [x] Windows: `SHGetFileInfo` → PNG data URL
+- [x] Size variants: `small`, `medium`
 
 ### File Drag-Out (`drag`)
 
-- [ ] macOS: `NSDraggingSource` protocol implementation
-- [ ] Windows: OLE `IDropSource` + `IDataObject` (CF_HDROP)
-- [ ] `ended` event with drop result + coordinates
-- [ ] Cross-platform `DragConfig` parity
+- [x] macOS: `NSDraggingSource` protocol implementation
+- [x] Windows: OLE `IDropSource` + `IDataObject` (CF_HDROP)
+- [x] `ended` event with drop result + coordinates
+- [x] Cross-platform `DragConfig` parity
 
 **Deliverable**: `apps` + `drag` modules shipped.
 

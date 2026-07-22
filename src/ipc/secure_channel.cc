@@ -63,8 +63,8 @@ std::string path_arg(const Napi::CallbackInfo& info, std::size_t index) {
     throw std::invalid_argument("executablePath must be a string");
   }
   const std::string path = info[index].As<Napi::String>().Utf8Value();
-  if (path.empty()) {
-    throw std::invalid_argument("executablePath must not be empty");
+  if (path.empty() || path.find('\0') != std::string::npos) {
+    throw std::invalid_argument("executablePath must be a valid path");
   }
   return path;
 }
@@ -84,7 +84,11 @@ std::vector<std::string> arguments_arg(
     if (!value.IsString()) {
       throw std::invalid_argument("arguments must be an array of strings");
     }
-    arguments.push_back(value.As<Napi::String>().Utf8Value());
+    std::string argument = value.As<Napi::String>().Utf8Value();
+    if (argument.find('\0') != std::string::npos) {
+      throw std::invalid_argument("arguments must not contain null bytes");
+    }
+    arguments.push_back(std::move(argument));
   }
   return arguments;
 }

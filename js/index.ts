@@ -346,6 +346,7 @@ class Apps {
   ): Promise<string | null> {
     assertMainProcess()
     requireAbsolutePath(appPath, 'appPath')
+    requireRecord(options, 'options')
     const size = options.size ?? 'small'
     if (size !== 'small' && size !== 'medium') {
       throw new TypeError('options.size must be small or medium')

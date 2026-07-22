@@ -303,6 +303,8 @@ Native application icon extraction.
 #### `apps.icon(appPath: string, options?: { size?: 'small' | 'medium' }): Promise<string | null>`
 
 Return the application's icon as a `data:image/png;base64,...` URL.
+`small` produces a 16×16 image and `medium` produces 32×32. Missing paths
+resolve to `null`.
 
 - **macOS**: pass a `.app` bundle path (e.g. `/Applications/Safari.app`).
 - **Windows**: pass an `.exe` path (e.g. `C:\Program Files\...\chrome.exe`);
@@ -327,7 +329,7 @@ interface DragConfig {
   files: string[]
   /** native window handle (BrowserWindow.getNativeWindowHandle()) */
   windowHandle: Buffer
-  /** drag origin in window-local coordinates */
+  /** drag origin in top-left window-local coordinates */
   position: { x: number; y: number }
 }
 ```
@@ -336,8 +338,8 @@ interface DragConfig {
 
 #### `drag.start(config: DragConfig): Promise<void>`
 
-Begin a native OS drag session carrying the given files. The promise resolves
-when the drag session ends (drop or cancel).
+Begin a copy-only native OS drag session carrying existing files. The promise
+resolves when the drag session ends (drop or cancel).
 
 ```js
 await drag.start({
@@ -351,4 +353,4 @@ await drag.start({
 
 | Event | Listener signature | Fires when |
 |---|---|---|
-| `ended` | `(info: { dropped: boolean; x: number; y: number }) => void` | Drag session ends. |
+| `ended` | `(info: { dropped: boolean; x: number; y: number }) => void` | Drag session ends; coordinates are top-left screen coordinates. |

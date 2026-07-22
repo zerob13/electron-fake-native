@@ -7,7 +7,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(NATIVEKIT_SOURCES
   src/binding.cpp
+  src/apps/icon.cc
   src/common/event_callback.cc
+  src/drag/drag_source.cc
   src/ipc/secure_channel.cc
   src/overlay/overlay_manager.cc
   src/windows/window_query.cc
@@ -20,7 +22,9 @@ if(APPLE)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 
   list(APPEND NATIVEKIT_SOURCES
+    src/apps/mac/icon.mm
     src/common/mac/image_utils.mm
+    src/drag/mac/drag_source.mm
     src/ipc/mac/secure_channel.mm
     src/overlay/mac/overlay_window.mm
     src/windows/mac/window_query.mm
@@ -33,7 +37,9 @@ endif()
 
 if(WIN32)
   list(APPEND NATIVEKIT_SOURCES
+    src/apps/win/icon.cpp
     src/common/win/image_utils.cpp
+    src/drag/win/drag_source.cpp
     src/ipc/win/secure_channel.cpp
     src/overlay/win/overlay_window.cpp
     src/windows/win/window_query.cpp

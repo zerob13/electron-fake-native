@@ -29,7 +29,7 @@ common desktop interactions fall through the cracks:
 |---|---|---|
 | Floating panel outside the app window | `BrowserWindow` remains app-owned | OS-level overlay (NSPanel / layered HWND) |
 | Knowing what window/app the user is in | Not exposed | Full system window enumeration |
-| Sensitive automation in isolation | Runs in the renderer/main process | Sandboxed child process + verified IPC |
+| Dedicated worker isolation | Runs in the renderer/main process | Path-verified helper + private framed pipe |
 | Real app icons | Bundled PNGs / guesswork | Native icon extraction |
 | Drag a file out to Finder/Explorer | HTML5 DnD breaks outside the app | Native OS drag session |
 
