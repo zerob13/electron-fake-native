@@ -215,11 +215,13 @@ PixbufPtr file_icon_pixbuf(const std::string& app_path, int pixels) {
 }  // namespace
 
 void require_gtk() {
-  if (gtk_is_initialized()) return;
+  static bool initialized = false;
+  if (initialized) return;
   if (!gtk_init_check(nullptr, nullptr)) {
     throw std::runtime_error(
         "nativekit Linux support requires an available desktop display");
   }
+  initialized = true;
 }
 
 GdkPixbuf* pixbuf_from_data_url(const std::string& data_url) {
