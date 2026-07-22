@@ -67,6 +67,7 @@ jobs:
             openbox \
             x11-utils \
             xauth \
+            xterm \
             xvfb
 
       - name: Setup MSVC
@@ -100,7 +101,7 @@ jobs:
             trap - EXIT
             if [ "$status" -ne 0 ]; then
               cat /tmp/nativekit-openbox.log || true
-              cat /tmp/nativekit-xmessage.log 2>/dev/null || true
+              cat /tmp/nativekit-xterm.log 2>/dev/null || true
               xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null || true
               xprop -root _NET_CLIENT_LIST 2>/dev/null || true
             fi
@@ -122,8 +123,9 @@ jobs:
           done
           test "$wm_ready" = true
 
-          xmessage -geometry 320x120+20+20 'nativekit CI fixture' \
-            >/tmp/nativekit-xmessage.log 2>&1 &
+          xterm -geometry 40x8+20+20 -title 'nativekit CI fixture' \
+            -hold -e /bin/sh -c 'printf "nativekit CI fixture\n"' \
+            >/tmp/nativekit-xterm.log 2>&1 &
           fixture_pid=$!
           fixture_ready=false
           for attempt in $(seq 1 150); do
