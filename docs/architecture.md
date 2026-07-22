@@ -68,11 +68,6 @@ src/
     window_query.*            Node-API module boundary
     mac/window_query.mm       CGWindowList and NSWorkspace
     win/window_query.cpp      EnumWindows, DWM, foreground window
-  ipc/
-    frame_decoder.h           4-byte little-endian frame decoder
-    secure_channel.*          module manager and Node-API boundary
-    mac/secure_channel.mm     posix_spawn and inherited pipe
-    win/secure_channel.cpp    restricted process, job, inherited pipe
   apps/                       exact-size application icon extraction
   drag/                       native file drag source
 js/index.ts                   public TypeScript API
@@ -128,39 +123,13 @@ normalizes screen points and rectangles to device-independent pixels (DIP) on
 Windows through Electron's `screen` module. macOS points already match Electron
 DIP semantics.
 
-### 4.3 `secureChannel`
-
-The channel launches one verified helper process and reads its stdout through a
-private inherited pipe:
-
-```text
-4-byte unsigned little-endian length | 1..16 MiB payload
-```
-
-There is no shell. stdin and stderr are redirected to the null device. The child
-is created suspended, its canonical executable path is verified, and only then
-is it resumed.
-
-- macOS: `posix_spawn`, a dedicated process group, `proc_pidpath`, and group
-  termination.
-- Windows: `CreateProcessAsUser` with a restricted token, an explicit inherited
-  handle list, path verification, and a kill-on-close Job object.
-
-The reader is drained before the exit event is queued. Data and exit use one
-ThreadSafeFunction, preserving `data...data...exit` order in JavaScript. An
-invalid length, oversized frame, read error, or truncated final frame terminates
-the channel and reports exit code `-1`.
-
-This reduces accidental privilege and IPC exposure. It is not a sandbox for
-hostile executables.
-
-### 4.4 `apps`
+### 4.3 `apps`
 
 `apps.icon()` resolves the operating-system icon and rasterizes it to exactly
 16×16 or 32×32 PNG pixels. macOS uses `NSWorkspace`; Windows uses Shell icon
 lookup plus WIC scaling and PNG encoding.
 
-### 4.5 `drag`
+### 4.4 `drag`
 
 The drag manager allows one active copy-only file drag. macOS uses
 `NSDraggingSession`; Windows uses an STA OLE thread with `CF_HDROP`,
@@ -180,7 +149,6 @@ Electron main/UI thread
 
 Native worker threads
   ├── Windows overlay message pump (STA)
-  ├── secure-channel reader + process waiter
   └── Windows OLE drag loop (STA)
 ```
 

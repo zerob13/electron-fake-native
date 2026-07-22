@@ -18,7 +18,7 @@ describe('published entry points', () => {
       ],
       { encoding: 'utf8' },
     )
-    expect(output).toBe('apps,drag,overlay,secureChannel,windows')
+    expect(output).toBe('apps,drag,overlay,windows')
   })
 
   it('loads the CommonJS bundle', () => {
@@ -31,6 +31,6 @@ describe('published entry points', () => {
       ],
       { encoding: 'utf8' },
     )
-    expect(output).toBe('apps,drag,overlay,secureChannel,windows')
+    expect(output).toBe('apps,drag,overlay,windows')
   })
 })

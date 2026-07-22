@@ -6,7 +6,6 @@ Cross-platform native desktop primitives for the Electron main process.
 
 - session-aware floating image overlays;
 - system-window enumeration and hit testing;
-- a path-verified framed worker channel;
 - exact-size operating-system application icons; and
 - native file drag-out with drop/cancel results.
 
@@ -15,7 +14,7 @@ Supported release targets are macOS arm64/x64 and Windows x64.
 ## Why this library exists
 
 Electron already provides topmost BrowserWindows, cross-workspace options on
-macOS, utility processes, and `webContents.startDrag()`. `nativekit` does not
+macOS, and `webContents.startDrag()`. `nativekit` does not
 pretend otherwise. It provides a narrower coordinated layer where applications
 need more state or results than those primitives expose.
 
@@ -23,7 +22,6 @@ need more state or results than those primitives expose.
 |---|---|
 | Multiple lightweight panels | Native image panels with stack, host, session, suppression, and active-session lifecycle |
 | Context-aware desktop UI | Cross-process system-window list, lookup, foreground app, and point hit testing |
-| Deterministic helper output | Canonical-path verification, private inherited pipe, bounded framing, and ordered data/exit events |
 | Installed application artwork | Native icon lookup normalized to exact 16×16 or 32×32 PNG |
 | File drag completion | Multi-file native copy drag with drop/cancel and final screen coordinates |
 
@@ -120,7 +118,7 @@ pnpm demo:smoke
 
 Interactive mode supports real application selection and Finder/Explorer file
 drag-out. Smoke mode validates window enumeration, icon extraction, overlay
-rendering, framed-worker delivery, and native drag-loop completion. A successful
+rendering, and native drag-loop completion. A successful
 macOS run prints one `NATIVEKIT_DEMO_SMOKE` JSON record and exits with status 0.
 
 ```text
@@ -129,10 +127,9 @@ macOS run prints one `NATIVEKIT_DEMO_SMOKE` JSON record and exits with status 0.
 ├───────────────────┬───────────────────────────────────┤
 │ Window awareness  │ Overlay                           │
 │ frontmost / list  │ show / hide / session state      │
-├───────────────────┼───────────────────────────────────┤
-│ Worker channel    │ App icon                          │
-│ frame / exit      │ native icon preview               │
 ├───────────────────┴───────────────────────────────────┤
+│ App icon: native icon preview                         │
+├───────────────────────────────────────────────────────┤
 │ File drag-out handle                                  │
 │ Ordered event log                                     │
 └───────────────────────────────────────────────────────┘
@@ -144,7 +141,6 @@ macOS run prints one `NATIVEKIT_DEMO_SMOKE` JSON record and exits with status 0.
 |---|---|---|
 | Overlay | non-activating `NSPanel`, all Spaces | layered topmost `HWND`, current virtual desktop |
 | Window query | CoreGraphics + NSWorkspace | EnumWindows + DWM |
-| Worker | suspended `posix_spawn` process group | suspended restricted-token process in a Job |
 | App icon | NSWorkspace | Shell + WIC |
 | File drag | NSDraggingSession | OLE `CF_HDROP` |
 | Public coordinates | Electron DIP | native pixels normalized to Electron DIP |
@@ -159,8 +155,7 @@ macOS.
 The source version and tag must match. For `0.4.0`:
 
 1. Configure npm trusted publishing for this GitHub repository and
-   `.github/workflows/release.yml`. For an initial token-based publish, add an
-   `NPM_TOKEN` repository secret instead.
+   `.github/workflows/release.yml`.
 2. Confirm the package version in `package.json` is `0.4.0`.
 3. Commit the release state and create tag `v0.4.0`.
 4. Push the tag.
@@ -173,12 +168,13 @@ The release workflow then:
 4. publishes the exact tarball; and
 5. attaches it to the matching GitHub release.
 
-Manual dispatch accepts an existing `vX.Y.Z` tag and performs the same gates.
+Pushing a matching `v*` tag starts the release; ordinary branch pushes,
+including `main`, do not. Manual dispatch can release an existing `vX.Y.Z` tag.
 No package version is rewritten inside CI.
 
 ## Status
 
-Phases 0–3 are implemented in the `0.4.0` release candidate. The physics-based
+Phases 0–2 are implemented in the `0.4.0` release candidate. The physics-based
 animation toolkit remains explicitly deferred; overlays use immediate movement.
 See [roadmap](docs/roadmap.md) for the verification matrix and 1.0 criteria.
 

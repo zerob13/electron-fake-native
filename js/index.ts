@@ -96,13 +96,6 @@ interface NativeBinding {
   windowsFind(id: number): SystemWindow | null
   windowsAtPoint(point: Point, belowId: number): SystemWindow | null
 
-  secureChannelSpawn(executablePath: string, arguments_: string[]): number | null
-  secureChannelVerify(pid: number, executablePath: string): boolean
-  secureChannelTerminate(): boolean
-  secureChannelOnEvent?(
-    callback: (type: 'data' | 'exit', payload: Buffer | number) => void,
-  ): void
-
   appsIcon(appPath: string, size: 'small' | 'medium'): string | null
 
   dragStart(config: DragConfig): boolean
@@ -314,39 +307,6 @@ class Windows {
   }
 }
 
-class SecureChannel extends EventEmitter {
-  spawn(
-    executablePath: string,
-    arguments_: string[] = [],
-  ): Promise<number | null> {
-    assertMainProcess()
-    requireAbsolutePath(executablePath, 'executablePath')
-    if (!Array.isArray(arguments_)) {
-      throw new TypeError('arguments must be an array')
-    }
-    arguments_.forEach((argument, index) => {
-      if (typeof argument !== 'string') {
-        throw new TypeError(`arguments[${index}] must be a string`)
-      }
-    })
-    return Promise.resolve(
-      native.secureChannelSpawn(executablePath, arguments_),
-    )
-  }
-
-  verify(pid: number, executablePath: string): Promise<boolean> {
-    assertMainProcess()
-    requirePositiveInteger(pid, 'pid')
-    requireAbsolutePath(executablePath, 'executablePath')
-    return Promise.resolve(native.secureChannelVerify(pid, executablePath))
-  }
-
-  terminate(): boolean {
-    assertMainProcess()
-    return native.secureChannelTerminate()
-  }
-}
-
 class Apps {
   icon(
     appPath: string,
@@ -396,7 +356,6 @@ class Drag extends EventEmitter {
 
 export const overlay = new Overlay()
 export const windows = new Windows()
-export const secureChannel = new SecureChannel()
 export const apps = new Apps()
 export const drag = new Drag()
 
@@ -407,14 +366,11 @@ native.overlayOnActivate?.(() => overlay.emit('activate'))
 native.overlayOnVisibilityRequest?.((visible) =>
   overlay.emit('visibilityRequest', visible),
 )
-native.secureChannelOnEvent?.((type, payload) => {
-  secureChannel.emit(type, payload)
-})
 native.dragOnEnded?.((result) =>
   drag.emit('ended', dragResultFromNativeCoordinates(result)),
 )
 
-export default { overlay, windows, secureChannel, apps, drag }
+export default { overlay, windows, apps, drag }
 
 function electronScreen(): ElectronScreen | null {
   if (process.platform !== 'win32' || !process.versions.electron) return null

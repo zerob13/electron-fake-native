@@ -5,7 +5,7 @@ code should call a narrow, context-isolated preload API instead of importing the
 package directly.
 
 ```ts
-import { apps, drag, overlay, secureChannel, windows } from '@zerob13/nativekit'
+import { apps, drag, overlay, windows } from '@zerob13/nativekit'
 ```
 
 Promise-returning methods currently wrap synchronous native results or native
@@ -227,54 +227,6 @@ Resolve one current window snapshot by native id.
 
 Return the first on-screen window containing the screen DIP point. `belowId`
 excludes that window and everything above it.
-
-## `secureChannel`
-
-Launch one path-verified worker and decode its stdout as ordered binary frames.
-This is process isolation and restricted IPC, not a hostile-code sandbox.
-
-Each frame is:
-
-```text
-uint32 little-endian payload length | non-empty payload bytes
-```
-
-Payload length must be between 1 byte and 16 MiB. Invalid or truncated framing
-terminates the channel and reports exit code `-1`.
-
-#### `secureChannel.spawn(executablePath: string, arguments?: string[]): Promise<number | null>`
-
-Start a worker without a shell. The absolute executable path is canonicalized
-and verified while the process is suspended. Returns its PID, or `null` if the
-path is invalid, startup fails, or another worker is active.
-
-```ts
-const pid = await secureChannel.spawn(process.execPath, [workerPath])
-```
-
-The worker's stdin and stderr point to the null device. stdout is reserved for
-framed messages. Child processes are terminated with the worker when the
-channel closes.
-
-#### `secureChannel.verify(pid: number, executablePath: string): Promise<boolean>`
-
-Compare a running process's canonical executable path with the expected path.
-`spawn()` performs this verification before resuming its child.
-
-#### `secureChannel.terminate(): boolean`
-
-Terminate the active worker and its process group/job. Returns `false` when no
-worker is active, including after a natural exit.
-
-### Events
-
-| Event | Listener | Meaning |
-|---|---|---|
-| `data` | `(payload: Buffer) => void` | One complete frame. |
-| `exit` | `(code: number) => void` | Worker exit after all decoded data events have been delivered. |
-
-On macOS, signal exits use `128 + signal`. Windows returns the process exit
-code converted to a signed 32-bit number. Channel/framing failures use `-1`.
 
 ## `apps`
 

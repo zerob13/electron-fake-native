@@ -6,7 +6,7 @@ Guide for AI agents (and humans) working on `nativekit`.
 
 `nativekit` is a cross-platform N-API native addon (C++) that gives Electron
 desktop apps OS-level capabilities: floating overlays, native window awareness,
-secure isolated IPC, app icon extraction, and file drag-out.
+app icon extraction, and file drag-out.
 
 - **Platforms**: macOS (arm64, x64), Windows (x64)
 - **Binding**: C++ via `node-addon-api` (N-API v8)
@@ -25,8 +25,6 @@ src/
   overlay/                    # floating panel system
     mac/*.mm  win/*.cpp
   windows/                    # system window query
-    mac/*.mm  win/*.cpp
-  ipc/                        # secureChannel
     mac/*.mm  win/*.cpp
   apps/                       # app icon extraction
     mac/*.mm  win/*.cpp
@@ -65,8 +63,7 @@ binding.gyp
 - **C++**: `snake_case` for files, functions, variables; `PascalCase` for
   classes/structs.
 - **JS/TS API**: camelCase methods, PascalCase types. Module names are
-  lowercase single words (`overlay`, `windows`, `apps`, `drag`,
-  `secureChannel`).
+  lowercase single words (`overlay`, `windows`, `apps`, `drag`).
 
 ### JS wrapper (`js/index.ts`)
 
@@ -107,9 +104,10 @@ Native build requires:
 GitHub Actions (`.github/workflows/`):
 1. `build.yml` — matrix builds `.node` on `macos-14` (arm64, cross x64),
    `windows-2022` (x64). Uploads each as a workflow artifact.
-2. `release.yml` — on `git tag v*`, downloads all build artifacts, assembles
-   `prebuilds/<platform>-<arch>/nativekit.node`, runs `prebuildify --napi`,
-   publishes to npm with `NPM_TOKEN`.
+2. `release.yml` — runs on `v*` tag pushes or manual dispatch with an existing
+   tag, downloads all build artifacts, assembles
+   `prebuilds/<platform>-<arch>/nativekit.node`, runs `prebuildify --napi`, and
+   publishes to npm through Trusted Publishing.
 
 See `docs/architecture.md` §9 for the distribution flow.
 

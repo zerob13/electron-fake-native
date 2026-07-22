@@ -19,34 +19,16 @@ void call_javascript(
           callback.Call({});
         } else if constexpr (std::is_same_v<Value, bool>) {
           callback.Call({Napi::Boolean::New(env, value)});
-        } else if constexpr (
-            std::is_same_v<Value, double> ||
-            std::is_same_v<Value, std::int32_t>) {
+        } else if constexpr (std::is_same_v<Value, double>) {
           callback.Call({Napi::Number::New(env, value)});
         } else if constexpr (std::is_same_v<Value, std::string>) {
           callback.Call({Napi::String::New(env, value)});
-        } else if constexpr (std::is_same_v<Value, std::vector<std::uint8_t>>) {
-          callback.Call({Napi::Buffer<std::uint8_t>::Copy(
-              env, value.data(), value.size())});
         } else if constexpr (std::is_same_v<Value, DragEndedEvent>) {
           Napi::Object result = Napi::Object::New(env);
           result.Set("dropped", value.dropped);
           result.Set("x", value.x);
           result.Set("y", value.y);
           callback.Call({result});
-        } else if constexpr (std::is_same_v<Value, SecureChannelEvent>) {
-          if (value.type == SecureChannelEventType::kData) {
-            callback.Call({
-                Napi::String::New(env, "data"),
-                Napi::Buffer<std::uint8_t>::Copy(
-                    env, value.data.data(), value.data.size()),
-            });
-          } else {
-            callback.Call({
-                Napi::String::New(env, "exit"),
-                Napi::Number::New(env, value.exit_code),
-            });
-          }
         }
       },
       *owned);

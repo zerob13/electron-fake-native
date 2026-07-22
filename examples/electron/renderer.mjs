@@ -6,7 +6,6 @@ const status = element('status')
 const frontmost = element('frontmost')
 const windowList = element('window-list')
 const overlayState = element('overlay-state')
-const workerState = element('worker-state')
 const appIcon = element('app-icon')
 const appName = element('app-name')
 const dragHandle = element('drag-handle')
@@ -74,15 +73,7 @@ function renderIcon(icon, name) {
 }
 
 const unsubscribe = api.onEvent(({ topic, data }) => {
-  if (topic === 'worker') {
-    if (data.type === 'data') {
-      workerState.textContent = `Frame: ${data.payload}`
-      log(`Worker frame: ${data.payload}`)
-    } else {
-      workerState.textContent = `Worker exited with code ${data.code}.`
-      log(workerState.textContent)
-    }
-  } else if (topic === 'overlay') {
+  if (topic === 'overlay') {
     log(`Overlay event: ${JSON.stringify(data)}`)
   } else if (topic === 'drag') {
     dragActive = false
@@ -113,22 +104,6 @@ element('hide-overlay').addEventListener('click', async (event) => {
   if (state) {
     overlayState.textContent = `Visible: ${state.active}; presentations retained: ${state.any}.`
     log('Overlay hidden.')
-  }
-})
-
-element('start-worker').addEventListener('click', async (event) => {
-  const worker = await run(event.currentTarget, api.startWorker)
-  if (worker) {
-    workerState.textContent = `Worker PID ${worker.pid}.`
-    log(`Verified worker ${worker.pid}.`)
-  }
-})
-
-element('stop-worker').addEventListener('click', async (event) => {
-  const stopped = await run(event.currentTarget, api.stopWorker)
-  if (stopped !== null) {
-    workerState.textContent = stopped ? 'Worker terminated.' : 'No worker to stop.'
-    log(workerState.textContent)
   }
 })
 
@@ -180,8 +155,7 @@ async function initialize() {
       renderWindows(result.windows)
       renderIcon(result.icon, 'Electron')
       overlayState.textContent = `Visible: ${result.overlay.active}; presentations: ${result.overlay.any}.`
-      workerState.textContent = `Frame: ${result.worker.payload}`
-      dragFile.textContent = 'worker.mjs'
+      dragFile.textContent = 'renderer.mjs'
       dragHandle.disabled = false
       await new Promise((resolvePromise) => requestAnimationFrame(resolvePromise))
       const dragBounds = dragHandle.getBoundingClientRect()
@@ -201,7 +175,6 @@ async function initialize() {
         windows: result.windows.list.length,
         icon: Boolean(result.icon),
         overlay: result.overlay.active,
-        worker: Boolean(result.worker.payload),
         drag: typeof dragResult.dropped === 'boolean',
       })
     }

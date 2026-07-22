@@ -1,6 +1,5 @@
-import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
-import { basename, isAbsolute } from 'node:path'
+import { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
@@ -14,14 +13,15 @@ import {
   apps,
   drag,
   overlay,
-  secureChannel,
   windows,
 } from '@zerob13/nativekit'
 
 const hostId = 'nativekit-demo'
 const presentationId = 'nativekit-sample'
 const sessionId = 'nativekit-demo-session'
-const workerPath = fileURLToPath(new URL('./worker.mjs', import.meta.url))
+const smokeDragFilePath = fileURLToPath(
+  new URL('./renderer.mjs', import.meta.url),
+)
 const smokeMode = process.argv.includes('--smoke')
 const channels = []
 
@@ -125,49 +125,6 @@ function showOverlay() {
   return { active: overlay.hasActive(), any: overlay.hasAny() }
 }
 
-function nodeExecutable() {
-  for (const candidate of [
-    process.env.npm_node_execpath,
-    process.env.NODE,
-  ]) {
-    if (candidate && isAbsolute(candidate) && existsSync(candidate)) {
-      return candidate
-    }
-  }
-  throw new Error('Node executable not found; launch the demo through pnpm')
-}
-
-async function startWorker() {
-  const executable = nodeExecutable()
-  const pid = await secureChannel.spawn(executable, [workerPath])
-  if (pid === null) throw new Error('A worker is already active or failed to start')
-  return { pid, executable }
-}
-
-function waitForWorkerFrame(timeoutMs = 3_000) {
-  let onData = null
-  let timer = null
-  const promise = new Promise((resolvePromise, rejectPromise) => {
-    onData = (payload) => {
-      clearTimeout(timer)
-      secureChannel.off('data', onData)
-      resolvePromise(payload.toString('utf8'))
-    }
-    timer = setTimeout(() => {
-      secureChannel.off('data', onData)
-      rejectPromise(new Error('Timed out waiting for a worker frame'))
-    }, timeoutMs)
-    secureChannel.on('data', onData)
-  })
-  return {
-    promise,
-    cancel: () => {
-      if (timer !== null) clearTimeout(timer)
-      if (onData !== null) secureChannel.off('data', onData)
-    },
-  }
-}
-
 async function windowSnapshot() {
   const [frontmost, list] = await Promise.all([
     windows.frontmost(),
@@ -177,18 +134,6 @@ async function windowSnapshot() {
 }
 
 async function runSmoke() {
-  const frame = waitForWorkerFrame()
-  let worker
-  let payload
-  try {
-    worker = await startWorker()
-    payload = await frame.promise
-  } catch (error) {
-    frame.cancel()
-    secureChannel.terminate()
-    throw error
-  }
-  const stopped = secureChannel.terminate()
   const snapshot = await windowSnapshot()
   const icon = await apps.icon(process.execPath, { size: 'medium' })
   const overlayState = showOverlay()
@@ -200,7 +145,6 @@ async function runSmoke() {
     windows: snapshot,
     icon,
     overlay: overlayState,
-    worker: { ...worker, payload, stopped },
     drag: 'prepared for synthetic pointer validation',
   }
 }
@@ -210,7 +154,7 @@ async function runSmokeDrag(position) {
   if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
     throw new TypeError('A finite drag position is required')
   }
-  selectedDragFile = workerPath
+  selectedDragFile = smokeDragFilePath
 
   let timeout = null
   const ended = new Promise((resolvePromise, rejectPromise) => {
@@ -289,7 +233,6 @@ function registerIpc() {
     platform: process.platform,
     arch: process.arch,
     electron: process.versions.electron,
-    nodeWorker: nodeExecutable(),
   }))
   handle('nativekit:windows:refresh', windowSnapshot)
   handle('nativekit:overlay:show', async () => showOverlay())
@@ -297,8 +240,6 @@ function registerIpc() {
     overlay.setVisible(false)
     return { active: overlay.hasActive(), any: overlay.hasAny() }
   })
-  handle('nativekit:worker:start', startWorker)
-  handle('nativekit:worker:stop', async () => secureChannel.terminate())
   handle('nativekit:apps:pick', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose an application',
@@ -352,12 +293,6 @@ function wireNativeEvents() {
   overlay.on('visibilityRequest', (visible) => {
     sendEvent('overlay', { type: 'visibility', visible })
   })
-  secureChannel.on('data', (payload) => {
-    sendEvent('worker', { type: 'data', payload: payload.toString('utf8') })
-  })
-  secureChannel.on('exit', (code) => {
-    sendEvent('worker', { type: 'exit', code })
-  })
   drag.on('ended', (result) => sendEvent('drag', result))
 }
 
@@ -387,7 +322,6 @@ function createWindow() {
   mainWindow.on('closed', () => {
     if (boundsTimer !== null) clearTimeout(boundsTimer)
     boundsTimer = null
-    secureChannel.terminate()
     overlay.stop()
     overlayStarted = false
     mainWindow = null
@@ -412,7 +346,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
-  secureChannel.terminate()
   overlay.stop()
   for (const channel of channels) ipcMain.removeHandler(channel)
 })

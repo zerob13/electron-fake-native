@@ -84,6 +84,10 @@ p {
   border-left: 1px solid var(--border);
 }
 
+.feature-grid > section:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 section {
   min-width: 0;
   padding: 18px;

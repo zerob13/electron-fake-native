@@ -1,7 +1,7 @@
 # Roadmap
 
-The original capability roadmap through Phase 3 is implemented in release
-candidate `0.4.0`. Phase 4 remains intentionally deferred because a partial
+The original capability roadmap through Phase 2 is implemented in release
+candidate `0.4.0`. Phase 3 remains intentionally deferred because a partial
 animation surface would create cross-platform behavior the library cannot keep.
 
 ## Phase 0 — Foundation (`windows`)
@@ -29,19 +29,7 @@ animation surface would create cross-platform behavior the library cannot keep.
 - [x] Session complete, invalidate, suppress, activate, and visibility lifecycle
 - [x] Immediate cross-platform transitions with no partial animation contract
 
-## Phase 2 — Verified worker channel (`secureChannel`)
-
-- [x] Private inherited stdout pipe with 4-byte little-endian framing
-- [x] Non-empty payloads up to 16 MiB
-- [x] Suspended start and canonical executable-path verification
-- [x] macOS `posix_spawn`, isolated process group, and group termination
-- [x] Windows restricted token, inherited-handle allowlist, and Job lifetime
-- [x] Null stdin/stderr and no shell
-- [x] Ordered `data...exit` delivery through one ThreadSafeFunction
-- [x] Invalid/truncated channel detection and exit code `-1`
-- [x] Deterministic cleanup and active-worker termination semantics
-
-## Phase 3 — Desktop integration (`apps`, `drag`, demo, release)
+## Phase 2 — Desktop integration (`apps`, `drag`, demo, release)
 
 ### App icons
 
@@ -65,14 +53,14 @@ animation surface would create cross-platform behavior the library cannot keep.
 - [x] Automated macOS capability smoke, including native drag-loop completion
 - [x] CMake primary build and `binding.gyp` fallback
 - [x] Matrix CI build/test/package gates for all supported targets
-- [x] Tag-driven npm tarball assembly and GitHub release workflow
+- [x] Tag-triggered or manual npm tarball assembly and GitHub release workflow
 - [x] Node-API prebuild lookup through `node-gyp-build`
 
 ## Verification status
 
 | Target | Compile | Native integration | Interactive demo |
 |---|---|---|---|
-| `darwin-arm64` | Local CMake + node-gyp | 14 integration tests | Smoke and visual QA complete |
+| `darwin-arm64` | Local CMake + node-gyp | 10 integration tests | Smoke and visual QA complete |
 | `darwin-x64` | Local cross-compile + CI workflow | CI gate configured | Requires an Intel runner/device |
 | `win32-x64` | CI workflow configured; code statically reviewed | CI gate configured | Explorer drop and visual behavior require a Windows device |
 
@@ -80,7 +68,7 @@ Windows is implemented, but it is not described as locally runtime-verified.
 The release workflow makes a Windows compile and integration pass mandatory
 before npm publication.
 
-## Phase 4 — Animation toolkit (deferred)
+## Phase 3 — Animation toolkit (deferred)
 
 This phase remains out of scope unless all criteria can ship together:
 
@@ -98,6 +86,5 @@ Until then, overlay movement remains immediate.
 |---|---|
 | `0.1.0` | window awareness |
 | `0.2.0` | window awareness + overlay |
-| `0.3.0` | verified worker channel |
 | `0.4.0` | app icons, drag-out, demo, and release pipeline |
 | `1.0.0` | after public API feedback and Windows device qualification |

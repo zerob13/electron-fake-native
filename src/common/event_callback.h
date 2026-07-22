@@ -2,11 +2,9 @@
 
 #include <napi.h>
 
-#include <cstdint>
 #include <mutex>
 #include <string>
 #include <variant>
-#include <vector>
 
 namespace nativekit {
 
@@ -16,26 +14,12 @@ struct DragEndedEvent {
   double y = 0;
 };
 
-enum class SecureChannelEventType {
-  kData,
-  kExit,
-};
-
-struct SecureChannelEvent {
-  SecureChannelEventType type = SecureChannelEventType::kData;
-  std::vector<std::uint8_t> data;
-  std::int32_t exit_code = 0;
-};
-
 using EventPayload = std::variant<
     std::monostate,
     bool,
     double,
-    std::int32_t,
     std::string,
-    std::vector<std::uint8_t>,
-    DragEndedEvent,
-    SecureChannelEvent>;
+    DragEndedEvent>;
 
 class EventCallback {
  public:

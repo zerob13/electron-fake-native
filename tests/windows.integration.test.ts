@@ -6,12 +6,11 @@ import {
   apps,
   drag,
   overlay,
-  secureChannel,
   windows,
   type SystemWindow,
 } from '../js/index.js'
 
-const workerPath = resolve(import.meta.dirname, 'fixtures/framed-worker.mjs')
+const testFilePath = resolve(import.meta.dirname, 'windows.integration.test.ts')
 
 function expectWindowShape(window: SystemWindow): void {
   expect(Number.isSafeInteger(window.id)).toBe(true)
@@ -60,11 +59,7 @@ describe('JavaScript boundary validation', () => {
     ).toThrow('PNG or JPEG data URL')
   })
 
-  it('rejects relative executable and application paths', () => {
-    expect(() => secureChannel.spawn('worker')).toThrow('absolute path')
-    expect(() =>
-      secureChannel.spawn(process.execPath, [42 as unknown as string]),
-    ).toThrow('arguments[0] must be a string')
+  it('rejects relative application paths', () => {
     expect(() => apps.icon('Safari.app')).toThrow('absolute path')
   })
 })
@@ -83,84 +78,6 @@ describe('overlay lifecycle integration', () => {
 
     expect(overlay.stop()).toBe(true)
     expect(overlay.stop()).toBe(true)
-  })
-})
-
-describe('secure channel integration', () => {
-  it('verifies the executable and decodes framed worker output', async () => {
-    const data = new Promise<Buffer>((resolvePromise) => {
-      secureChannel.once('data', resolvePromise)
-    })
-    const exit = new Promise<number>((resolvePromise) => {
-      secureChannel.once('exit', resolvePromise)
-    })
-
-    const pid = await secureChannel.spawn(process.execPath, [workerPath])
-    expect(pid).not.toBeNull()
-    expect(await secureChannel.verify(pid!, process.execPath)).toBe(true)
-    expect(await secureChannel.spawn(process.execPath, [workerPath])).toBeNull()
-    await expect(data).resolves.toEqual(Buffer.from('nativekit-worker'))
-    await expect(exit).resolves.toBe(0)
-    expect(secureChannel.terminate()).toBe(false)
-  })
-
-  it('terminates an active worker', async () => {
-    const data = new Promise<Buffer>((resolvePromise) => {
-      secureChannel.once('data', resolvePromise)
-    })
-    const exit = new Promise<number>((resolvePromise) => {
-      secureChannel.once('exit', resolvePromise)
-    })
-
-    expect(
-      await secureChannel.spawn(process.execPath, [workerPath, '--wait']),
-    ).not.toBeNull()
-    await data
-    expect(secureChannel.terminate()).toBe(true)
-    await expect(exit).resolves.toEqual(expect.any(Number))
-  })
-
-  it('delivers every decoded frame before exit', async () => {
-    const events: string[] = []
-    const onData = (payload: Buffer): void => {
-      events.push(payload.toString('utf8'))
-    }
-    secureChannel.on('data', onData)
-    const exit = new Promise<number>((resolvePromise) => {
-      secureChannel.once('exit', (code) => {
-        events.push(`exit:${code}`)
-        resolvePromise(code)
-      })
-    })
-
-    expect(
-      await secureChannel.spawn(process.execPath, [workerPath, '--burst']),
-    ).not.toBeNull()
-    await expect(exit).resolves.toBe(0)
-    secureChannel.off('data', onData)
-    expect(events).toEqual([
-      ...Array.from({ length: 64 }, (_, index) => `frame-${index}`),
-      'exit:0',
-    ])
-  })
-
-  it('reports a truncated final frame as a channel error', async () => {
-    const frames: Buffer[] = []
-    const onData = (payload: Buffer): void => {
-      frames.push(payload)
-    }
-    secureChannel.on('data', onData)
-    const exit = new Promise<number>((resolvePromise) => {
-      secureChannel.once('exit', resolvePromise)
-    })
-
-    expect(
-      await secureChannel.spawn(process.execPath, [workerPath, '--truncated']),
-    ).not.toBeNull()
-    await expect(exit).resolves.toBe(-1)
-    secureChannel.off('data', onData)
-    expect(frames).toEqual([])
-    expect(secureChannel.terminate()).toBe(false)
   })
 })
 
@@ -184,7 +101,7 @@ describe('drag boundary integration', () => {
   it('rejects an invalid native window handle', async () => {
     await expect(
       drag.start({
-        files: [workerPath],
+        files: [testFilePath],
         windowHandle: Buffer.alloc(8),
         position: { x: 0, y: 0 },
       }),

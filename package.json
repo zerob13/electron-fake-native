@@ -1,7 +1,7 @@
 {
   "name": "@zerob13/nativekit",
   "version": "0.4.0",
-  "description": "Cross-platform native capabilities for Electron: overlays, window awareness, isolated IPC, app icons, and file drag-out.",
+  "description": "Cross-platform native capabilities for Electron: overlays, window awareness, app icons, and file drag-out.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -65,7 +65,6 @@
     "n-api",
     "overlay",
     "window",
-    "ipc",
     "drag-drop",
     "cross-platform"
   ],
