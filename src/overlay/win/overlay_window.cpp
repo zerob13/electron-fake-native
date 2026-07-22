@@ -805,6 +805,7 @@ struct DecodedBitmap {
 struct RenderItem {
   std::string id;
   std::string host_id;
+  HWND owner_window = nullptr;
   std::wstring title;
   std::wstring hide_tooltip;
   std::wstring relocate_tooltip;
@@ -1250,7 +1251,7 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
     state->hide_tooltip = item.hide_tooltip;
     state->relocate_tooltip = item.relocate_tooltip;
     const HWND window = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
         kOverlayClassName,
         item.title.c_str(),
         WS_POPUP,
@@ -1258,7 +1259,7 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
         item.frame.top,
         item.image.width,
         item.image.height,
-        nullptr,
+        item.owner_window,
         nullptr,
         instance_,
         state.get());
@@ -1354,6 +1355,14 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
       RenderItem item;
       item.id = presentation.id;
       item.host_id = presentation.host_id;
+      item.owner_window =
+          reinterpret_cast<HWND>(host->second->window_handle);
+      DWORD owner_process_id = 0;
+      if (!IsWindow(item.owner_window) ||
+          GetWindowThreadProcessId(item.owner_window, &owner_process_id) == 0 ||
+          owner_process_id != GetCurrentProcessId()) {
+        item.owner_window = nullptr;
+      }
       item.title = wide_string(host->second->title);
       item.hide_tooltip = wide_string(snapshot.options.hide_tooltip);
       item.relocate_tooltip =
@@ -1437,12 +1446,28 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
 
     for (auto item = items.rbegin(); item != items.rend(); ++item) {
       auto existing = windows_.find(item->id);
+      if (existing != windows_.end() &&
+          (existing->second->window == nullptr ||
+           !IsWindow(existing->second->window))) {
+        windows_.erase(existing);
+        existing = windows_.end();
+      }
       HWND window = nullptr;
       if (existing == windows_.end()) {
         window = create_overlay_window(*item);
         existing = windows_.find(item->id);
       } else {
         window = existing->second->window;
+        if (GetWindow(window, GW_OWNER) != item->owner_window) {
+          SetLastError(ERROR_SUCCESS);
+          const LONG_PTR previous_owner = SetWindowLongPtrW(
+              window,
+              GWLP_HWNDPARENT,
+              reinterpret_cast<LONG_PTR>(item->owner_window));
+          if (previous_owner == 0 && GetLastError() != ERROR_SUCCESS) {
+            throw_windows_error("SetWindowLongPtrW(GWLP_HWNDPARENT)");
+          }
+        }
         existing->second->host_id = item->host_id;
         existing->second->controls = control_rects(
             item->image.width,
