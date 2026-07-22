@@ -2,6 +2,8 @@
 
 Cross-platform native desktop primitives for the Electron main process.
 
+[简体中文](README.zh-CN.md) · [Electron integration guide（中文）](docs/integration-guide.zh-CN.md)
+
 `nativekit` packages a TypeScript API and a Node-API v8 addon for:
 
 - session-aware floating image overlays;
@@ -20,7 +22,7 @@ need more state or results than those primitives expose.
 
 | Need | `nativekit` behavior |
 |---|---|
-| Multiple lightweight panels | Native image panels with stack, host, session, suppression, and active-session lifecycle |
+| Multiple lightweight panels | Draggable native image panels with stack, host, session, suppression, and active-session lifecycle |
 | Context-aware desktop UI | Cross-process system-window list, lookup, foreground app, and point hit testing |
 | Installed application artwork | Native icon lookup normalized to exact 16×16 or 32×32 PNG |
 | File drag completion | Multi-file native copy drag with drop/cancel and final screen coordinates |
@@ -116,7 +118,8 @@ pnpm demo
 pnpm demo:smoke
 ```
 
-Interactive mode supports real application selection and Finder/Explorer file
+Interactive mode supports direct native-panel movement, multi-image selection
+with five-second rotation, real application selection, and Finder/Explorer file
 drag-out. Smoke mode validates window enumeration, icon extraction, overlay
 rendering, and native drag-loop completion. A successful
 macOS run prints one `NATIVEKIT_DEMO_SMOKE` JSON record and exits with status 0.
@@ -126,7 +129,7 @@ macOS run prints one `NATIVEKIT_DEMO_SMOKE` JSON record and exits with status 0.
 │ Status                              platform / arch   │
 ├───────────────────┬───────────────────────────────────┤
 │ Window awareness  │ Overlay                           │
-│ frontmost / list  │ show / hide / session state      │
+│ frontmost / list  │ show / hide / drag / image cycle │
 ├───────────────────┴───────────────────────────────────┤
 │ App icon: native icon preview                         │
 ├───────────────────────────────────────────────────────┤
@@ -139,7 +142,7 @@ macOS run prints one `NATIVEKIT_DEMO_SMOKE` JSON record and exits with status 0.
 
 | Capability | macOS | Windows |
 |---|---|---|
-| Overlay | non-activating `NSPanel`, all Spaces | layered topmost `HWND`, current virtual desktop |
+| Overlay | draggable non-activating `NSPanel`, all Spaces | draggable layered topmost `HWND`, current virtual desktop |
 | Window query | CoreGraphics + NSWorkspace | EnumWindows + DWM |
 | App icon | NSWorkspace | Shell + WIC |
 | File drag | NSDraggingSession | OLE `CF_HDROP` |
@@ -171,12 +174,6 @@ The release workflow then:
 Pushing a matching `v*` tag starts the release; ordinary branch pushes,
 including `main`, do not. Manual dispatch can release an existing `vX.Y.Z` tag.
 No package version is rewritten inside CI.
-
-## Status
-
-Phases 0–2 are implemented in the `0.4.0` release candidate. The physics-based
-animation toolkit remains explicitly deferred; overlays use immediate movement.
-See [roadmap](docs/roadmap.md) for the verification matrix and 1.0 criteria.
 
 ## License
 

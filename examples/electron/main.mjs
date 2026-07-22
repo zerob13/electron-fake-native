@@ -19,6 +19,8 @@ import {
 const hostId = 'nativekit-demo'
 const presentationId = 'nativekit-sample'
 const sessionId = 'nativekit-demo-session'
+const overlayRotationIntervalMs = 5_000
+const maximumOverlaySourceSize = 1_600
 const smokeDragFilePath = fileURLToPath(
   new URL('./renderer.mjs', import.meta.url),
 )
@@ -27,6 +29,9 @@ const channels = []
 
 let mainWindow = null
 let selectedDragFile = null
+let selectedOverlayImages = []
+let overlayImageIndex = 0
+let overlayRotationTimer = null
 let overlayStarted = false
 let boundsTimer = null
 
@@ -57,7 +62,9 @@ function handle(channel, handler) {
 function attachOverlayHost() {
   if (!mainWindow || mainWindow.isDestroyed()) return
   if (!overlayStarted) {
-    overlay.start({ tooltip: { hide: 'Hide', relocate: 'Move' } })
+    overlay.start({
+      tooltip: { hide: 'Hide', relocate: 'Move to next anchor' },
+    })
     overlayStarted = true
   }
   overlay.attachHost({
@@ -111,18 +118,105 @@ function sampleImageDataUrl() {
   return `data:image/png;base64,${image.toPNG().toString('base64')}`
 }
 
-function showOverlay() {
+function selectedImageDataUrl(path) {
+  const image = nativeImage.createFromPath(path)
+  if (image.isEmpty()) throw new Error(`Could not load ${basename(path)}`)
+  const size = image.getSize()
+  const longestEdge = Math.max(size.width, size.height)
+  const renderedImage = longestEdge > maximumOverlaySourceSize
+    ? image.resize({
+        width: Math.max(
+          1,
+          Math.round(size.width * maximumOverlaySourceSize / longestEdge),
+        ),
+        height: Math.max(
+          1,
+          Math.round(size.height * maximumOverlaySourceSize / longestEdge),
+        ),
+        quality: 'good',
+      })
+    : image
+  return `data:image/png;base64,${renderedImage.toPNG().toString('base64')}`
+}
+
+function overlayImageAt(imagePaths, imageIndex) {
+  if (imagePaths.length === 0) {
+    return { imageData: sampleImageDataUrl(), name: 'Built-in sample' }
+  }
+  const path = imagePaths[imageIndex]
+  return { imageData: selectedImageDataUrl(path), name: basename(path) }
+}
+
+function presentOverlayImage(image, imageCount, imageIndex) {
   attachOverlayHost()
   overlay.setVisible(true)
   overlay.pushImage({
     hostId,
     presentationId,
     sessionId,
-    imageData: sampleImageDataUrl(),
+    imageData: image.imageData,
     appIconPath: process.execPath,
   })
   overlay.setActiveSession(sessionId)
-  return { active: overlay.hasActive(), any: overlay.hasAny() }
+  return {
+    active: overlay.hasActive(),
+    any: overlay.hasAny(),
+    imageCount,
+    imageIndex: imageCount === 0 ? null : imageIndex,
+    imageName: image.name,
+  }
+}
+
+function showOverlay() {
+  return presentOverlayImage(
+    overlayImageAt(selectedOverlayImages, overlayImageIndex),
+    selectedOverlayImages.length,
+    overlayImageIndex,
+  )
+}
+
+function stopOverlayRotation() {
+  if (overlayRotationTimer !== null) clearInterval(overlayRotationTimer)
+  overlayRotationTimer = null
+}
+
+function startOverlayRotation() {
+  stopOverlayRotation()
+  if (selectedOverlayImages.length < 2) return
+  overlayRotationTimer = setInterval(() => {
+    const nextImageIndex =
+      (overlayImageIndex + 1) % selectedOverlayImages.length
+    try {
+      const image = overlayImageAt(selectedOverlayImages, nextImageIndex)
+      const state = presentOverlayImage(
+        image,
+        selectedOverlayImages.length,
+        nextImageIndex,
+      )
+      overlayImageIndex = nextImageIndex
+      sendEvent('overlay', { type: 'image', ...state })
+    } catch (error) {
+      stopOverlayRotation()
+      sendEvent('overlay', { type: 'rotationError', message: errorMessage(error) })
+    }
+  }, overlayRotationIntervalMs)
+  overlayRotationTimer.unref?.()
+}
+
+async function pickOverlayImages() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose overlay images',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  const image = overlayImageAt(result.filePaths, 0)
+  const state = presentOverlayImage(image, result.filePaths.length, 0)
+  stopOverlayRotation()
+  selectedOverlayImages = result.filePaths
+  overlayImageIndex = 0
+  startOverlayRotation()
+  return state
 }
 
 async function windowSnapshot() {
@@ -235,8 +329,14 @@ function registerIpc() {
     electron: process.versions.electron,
   }))
   handle('nativekit:windows:refresh', windowSnapshot)
-  handle('nativekit:overlay:show', async () => showOverlay())
+  handle('nativekit:overlay:show', async () => {
+    const state = showOverlay()
+    startOverlayRotation()
+    return state
+  })
+  handle('nativekit:overlay:pick', pickOverlayImages)
   handle('nativekit:overlay:hide', async () => {
+    stopOverlayRotation()
     overlay.setVisible(false)
     return { active: overlay.hasActive(), any: overlay.hasAny() }
   })
@@ -291,7 +391,14 @@ function wireNativeEvents() {
     sendEvent('overlay', { type: 'activate' })
   })
   overlay.on('visibilityRequest', (visible) => {
-    sendEvent('overlay', { type: 'visibility', visible })
+    if (visible) startOverlayRotation()
+    else stopOverlayRotation()
+    sendEvent('overlay', {
+      type: 'visibility',
+      visible,
+      active: overlay.hasActive(),
+      any: overlay.hasAny(),
+    })
   })
   drag.on('ended', (result) => sendEvent('drag', result))
 }
@@ -322,6 +429,9 @@ function createWindow() {
   mainWindow.on('closed', () => {
     if (boundsTimer !== null) clearTimeout(boundsTimer)
     boundsTimer = null
+    stopOverlayRotation()
+    selectedOverlayImages = []
+    overlayImageIndex = 0
     overlay.stop()
     overlayStarted = false
     mainWindow = null
@@ -346,6 +456,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  stopOverlayRotation()
   overlay.stop()
   for (const channel of channels) ipcMain.removeHandler(channel)
 })

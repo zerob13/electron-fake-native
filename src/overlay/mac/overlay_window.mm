@@ -13,6 +13,40 @@
 
 #include "common/mac/image_utils.h"
 
+namespace {
+
+NSRect clamped_frame(NSRect requested, NSScreen* screen) {
+  if (screen == nil) return requested;
+  const NSRect available = screen.visibleFrame;
+  requested.size.width = std::min(requested.size.width, available.size.width);
+  requested.size.height = std::min(requested.size.height, available.size.height);
+  requested.origin.x = std::clamp(
+      requested.origin.x,
+      NSMinX(available),
+      NSMaxX(available) - requested.size.width);
+  requested.origin.y = std::clamp(
+      requested.origin.y,
+      NSMinY(available),
+      NSMaxY(available) - requested.size.height);
+  return requested;
+}
+
+NSScreen* screen_for_frame(NSRect frame) {
+  NSScreen* result = nil;
+  CGFloat largest_area = 0;
+  for (NSScreen* screen in NSScreen.screens) {
+    const NSRect intersection = NSIntersectionRect(frame, screen.frame);
+    const CGFloat area = intersection.size.width * intersection.size.height;
+    if (area > largest_area) {
+      largest_area = area;
+      result = screen;
+    }
+  }
+  return result;
+}
+
+}  // namespace
+
 @interface NativekitOverlayPanel : NSPanel
 @end
 
@@ -28,7 +62,8 @@
 @interface NativekitOverlayView : NSView
 - (instancetype)initWithActivate:(std::function<void()>)activate
                              hide:(std::function<void()>)hide
-                         relocate:(std::function<void()>)relocate;
+                         relocate:(std::function<void()>)relocate
+                            moved:(std::function<void(NSRect)>)moved;
 - (void)setContentImage:(NSImage*)image
                iconPath:(NSString*)iconPath
             hideTooltip:(NSString*)hideTooltip
@@ -43,17 +78,20 @@
   std::function<void()> activate_;
   std::function<void()> hide_;
   std::function<void()> relocate_;
+  std::function<void(NSRect)> moved_;
 }
 
 - (instancetype)initWithActivate:(std::function<void()>)activate
                              hide:(std::function<void()>)hide
-                         relocate:(std::function<void()>)relocate {
+                         relocate:(std::function<void()>)relocate
+                            moved:(std::function<void(NSRect)>)moved {
   self = [super initWithFrame:NSZeroRect];
   if (self == nil) return nil;
 
   activate_ = std::move(activate);
   hide_ = std::move(hide);
   relocate_ = std::move(relocate);
+  moved_ = std::move(moved);
   self.wantsLayer = YES;
   self.layer.backgroundColor = NSColor.clearColor.CGColor;
 
@@ -88,16 +126,36 @@
     [self addSubview:button];
   }
 
-  NSClickGestureRecognizer* double_click = [[NSClickGestureRecognizer alloc]
-      initWithTarget:self
-              action:@selector(activateOverlay:)];
-  double_click.numberOfClicksRequired = 2;
-  [self addGestureRecognizer:double_click];
   return self;
 }
 
 - (BOOL)acceptsFirstMouse:(NSEvent*)event {
   return YES;
+}
+
+- (NSView*)hitTest:(NSPoint)point {
+  NSView* hit = [super hitTest:point];
+  if (hit == nil) return nil;
+  if (hit == hide_button_ || [hit isDescendantOf:hide_button_] ||
+      hit == relocate_button_ || [hit isDescendantOf:relocate_button_]) {
+    return hit;
+  }
+  return self;
+}
+
+- (void)mouseDown:(NSEvent*)event {
+  if (event.clickCount == 2) {
+    if (activate_) activate_();
+    return;
+  }
+  NativekitOverlayPanel* panel = (NativekitOverlayPanel*)self.window;
+  const NSPoint previous_origin = panel.frame.origin;
+  [panel performWindowDragWithEvent:event];
+  const NSRect frame = clamped_frame(panel.frame, panel.screen);
+  [panel setFrame:frame display:YES animate:NO];
+  if (!NSEqualPoints(previous_origin, frame.origin) && moved_) {
+    moved_(frame);
+  }
 }
 
 - (void)layout {
@@ -130,10 +188,6 @@
   icon_view_.hidden = icon_view_.image == nil;
   hide_button_.toolTip = hideTooltip;
   relocate_button_.toolTip = relocateTooltip;
-}
-
-- (void)activateOverlay:(id)sender {
-  if (activate_) activate_();
 }
 
 - (void)hideOverlay:(id)sender {
@@ -247,6 +301,7 @@ class MacOverlayPlatform final : public OverlayPlatform {
     for (const auto& host : snapshot.hosts) hosts.emplace(host.id, host);
 
     std::unordered_set<std::string> active_ids;
+    std::unordered_set<std::string> visible_ids;
     std::unordered_map<std::string, double> cursors;
     for (const auto& presentation : snapshot.presentations) {
       active_ids.insert(presentation.id);
@@ -270,22 +325,30 @@ class MacOverlayPlatform final : public OverlayPlatform {
         panel.hidesOnDeactivate = NO;
         panel.releasedWhenClosed = NO;
         panel.becomesKeyOnlyIfNeeded = YES;
+        panel.movable = YES;
         panel.collectionBehavior =
             NSWindowCollectionBehaviorCanJoinAllSpaces |
             NSWindowCollectionBehaviorStationary |
             NSWindowCollectionBehaviorIgnoresCycle |
             NSWindowCollectionBehaviorFullScreenAuxiliary;
         const std::string host_id = presentation.host_id;
-        panel.contentView = [[NativekitOverlayView alloc]
+        const std::string presentation_id = presentation.id;
+        auto* content_view = [[NativekitOverlayView alloc]
             initWithActivate:events_.activate
                          hide:[this] {
                            if (events_.visibility_request) {
                              events_.visibility_request(false);
                            }
                          }
-                     relocate:[this, host_id] {
+                     relocate:[this, host_id, presentation_id] {
+                       manual_frames_.erase(presentation_id);
                        if (events_.relocate) events_.relocate(host_id);
-                     }];
+                     }
+                        moved:[this, presentation_id](NSRect frame) {
+                          manual_frames_.insert_or_assign(
+                              presentation_id, frame);
+                        }];
+        panel.contentView = content_view;
         panels_[identifier] = panel;
       }
 
@@ -305,23 +368,39 @@ class MacOverlayPlatform final : public OverlayPlatform {
 
       const NSSize size = fitted_size(image, host->second, snapshot.max_size);
       double& cursor = cursors[presentation.host_id];
-      if (presentation.visible && snapshot.visible &&
-          presentation_fits(host->second, size, cursor)) {
+      const bool eligible = presentation.visible && snapshot.visible;
+      const bool stack_slot_fits =
+          presentation_fits(host->second, size, cursor);
+      auto manual_frame = manual_frames_.find(presentation.id);
+      if (eligible && manual_frame != manual_frames_.end()) {
+        NSRect frame = manual_frame->second;
+        frame.size = size;
+        NSScreen* screen = panel.screen ?: screen_for_frame(frame);
+        if (screen == nil) screen = screen_for_host(host->second);
+        frame = clamped_frame(frame, screen);
+        manual_frame->second = frame;
+        [panel setFrame:frame display:YES animate:NO];
+        visible_ids.insert(presentation.id);
+      } else if (eligible && stack_slot_fits) {
         const NSRect frame = frame_for_presentation(host->second, size, cursor);
         [panel setFrame:frame display:YES animate:NO];
+        visible_ids.insert(presentation.id);
+        // Visible panels are ordered after layout so the active session wins.
+      } else {
+        [panel orderOut:nil];
+      }
+      if (eligible &&
+          (stack_slot_fits || manual_frame != manual_frames_.end())) {
         cursor += (host->second.anchor.edge == AnchorEdge::kLeading ||
                    host->second.anchor.edge == AnchorEdge::kTrailing)
                       ? size.height + 12
                       : size.width + 12;
-        // Visible panels are ordered after layout so the active session wins.
-      } else {
-        [panel orderOut:nil];
       }
     }
 
     for (auto iterator = snapshot.presentations.rbegin();
          iterator != snapshot.presentations.rend(); ++iterator) {
-      if (!iterator->visible || !snapshot.visible) continue;
+      if (visible_ids.find(iterator->id) == visible_ids.end()) continue;
       NativekitOverlayPanel* panel = panels_[ns_string(iterator->id)];
       if (panel != nil) [panel orderFrontRegardless];
     }
@@ -334,6 +413,7 @@ class MacOverlayPlatform final : public OverlayPlatform {
       [panel orderOut:nil];
       [panel close];
       [panels_ removeObjectForKey:identifier];
+      manual_frames_.erase(identifier.UTF8String ?: "");
     }
   }
 
@@ -362,10 +442,12 @@ class MacOverlayPlatform final : public OverlayPlatform {
       [panel close];
     }
     [panels_ removeAllObjects];
+    manual_frames_.clear();
   }
 
   OverlayPlatformEvents events_;
   NSMutableDictionary<NSString*, NativekitOverlayPanel*>* panels_;
+  std::unordered_map<std::string, NSRect> manual_frames_;
 };
 
 }  // namespace

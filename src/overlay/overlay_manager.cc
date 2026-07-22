@@ -105,6 +105,17 @@ class OverlayManager {
           }
         }),
         "nativekit.overlay.relocateDispatcher");
+    refresh_dispatcher_.set(
+        env,
+        Napi::Function::New(env, [this](const Napi::CallbackInfo&) {
+          if (!running_) return;
+          try {
+            sync();
+          } catch (...) {
+            // A best-effort DPI refresh must not unwind through N-API.
+          }
+        }),
+        "nativekit.overlay.refreshDispatcher");
   }
 
   bool start(OverlayOptions options) {
@@ -116,6 +127,7 @@ class OverlayManager {
           [this](const std::string& host_id) {
             relocate_dispatcher_.emit(host_id);
           },
+          [this] { refresh_dispatcher_.emit(); },
       });
     }
     running_ = true;
@@ -318,6 +330,7 @@ class OverlayManager {
     visibility_callback_.reset();
     visibility_dispatcher_.reset();
     relocate_dispatcher_.reset();
+    refresh_dispatcher_.reset();
   }
 
  private:
@@ -407,6 +420,7 @@ class OverlayManager {
   EventCallback visibility_callback_;
   EventCallback visibility_dispatcher_;
   EventCallback relocate_dispatcher_;
+  EventCallback refresh_dispatcher_;
 };
 
 OverlayManager manager;

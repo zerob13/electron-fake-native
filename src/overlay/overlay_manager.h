@@ -55,6 +55,7 @@ struct OverlayPlatformEvents {
   std::function<void()> activate;
   std::function<void(bool)> visibility_request;
   std::function<void(const std::string&)> relocate;
+  std::function<void()> refresh;
 };
 
 class OverlayPlatform {

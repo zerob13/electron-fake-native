@@ -139,6 +139,10 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.interaction-help {
+  margin: 12px 0 0;
+}
+
 .table-wrap {
   max-height: 150px;
   margin-top: 12px;

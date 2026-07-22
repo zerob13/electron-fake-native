@@ -107,8 +107,11 @@ UpdateLayeredWindow(PBGRA) + HWND_TOPMOST
 
 Both tails preserve image aspect ratio, render an optional application-icon
 badge, provide hide/relocate tooltips, scale controls for DPI, skip suppressed
-items in stack layout, and hide overflow items rather than overlap them. macOS
-panels can join all Spaces; Windows topmost windows remain on their current
+items in stack layout, and hide overflow items rather than overlap them. A user
+drag moves the native window directly without renderer IPC. The platform tail
+then owns the presentation's manual origin, clamps it to the current work area,
+and keeps its anchor-stack slot stable until relocate clears that state.
+macOS panels can join all Spaces; Windows topmost windows remain on their current
 virtual desktop because Win32 has no supported equivalent.
 
 ### 4.2 `windows`

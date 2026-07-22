@@ -6,6 +6,7 @@ const status = element('status')
 const frontmost = element('frontmost')
 const windowList = element('window-list')
 const overlayState = element('overlay-state')
+const overlayImages = element('overlay-images')
 const appIcon = element('app-icon')
 const appName = element('app-name')
 const dragHandle = element('drag-handle')
@@ -72,8 +73,24 @@ function renderIcon(icon, name) {
   appName.textContent = icon ? name : 'No icon was returned.'
 }
 
+function renderOverlay(state) {
+  overlayState.textContent = `Visible: ${state.active}; presentations: ${state.any}.`
+  overlayImages.textContent = state.imageCount > 1
+    ? `${state.imageCount} images selected · showing ${state.imageIndex + 1}/${state.imageCount}: ${state.imageName} · changes every 5s.`
+    : state.imageCount === 1
+      ? `1 image selected: ${state.imageName}.`
+      : 'Using the built-in sample.'
+}
+
 const unsubscribe = api.onEvent(({ topic, data }) => {
   if (topic === 'overlay') {
+    if (data.type === 'image') renderOverlay(data)
+    if (data.type === 'visibility') {
+      overlayState.textContent = `Visible: ${data.active}; presentations retained: ${data.any}.`
+    }
+    if (data.type === 'rotationError') {
+      setStatus(`Image rotation stopped: ${data.message}`, true)
+    }
     log(`Overlay event: ${JSON.stringify(data)}`)
   } else if (topic === 'drag') {
     dragActive = false
@@ -94,8 +111,16 @@ element('refresh-windows').addEventListener('click', async (event) => {
 element('show-overlay').addEventListener('click', async (event) => {
   const state = await run(event.currentTarget, api.showOverlay)
   if (state) {
-    overlayState.textContent = `Visible: ${state.active}; presentations: ${state.any}.`
-    log('Overlay sample shown.')
+    renderOverlay(state)
+    log('Overlay shown.')
+  }
+})
+
+element('pick-overlay-images').addEventListener('click', async (event) => {
+  const state = await run(event.currentTarget, api.pickOverlayImages)
+  if (state) {
+    renderOverlay(state)
+    log(`Selected ${state.imageCount} overlay images.`)
   }
 })
 
@@ -154,7 +179,7 @@ async function initialize() {
       const result = unwrap(await api.runSmoke())
       renderWindows(result.windows)
       renderIcon(result.icon, 'Electron')
-      overlayState.textContent = `Visible: ${result.overlay.active}; presentations: ${result.overlay.any}.`
+      renderOverlay(result.overlay)
       dragFile.textContent = 'renderer.mjs'
       dragHandle.disabled = false
       await new Promise((resolvePromise) => requestAnimationFrame(resolvePromise))

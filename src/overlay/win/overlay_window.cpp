@@ -37,6 +37,7 @@ constexpr wchar_t kDispatcherClassName[] =
     L"NativekitOverlayDispatcherWindow";
 constexpr wchar_t kOverlayClassName[] = L"NativekitOverlayWindow";
 constexpr UINT kInvokeMessage = WM_APP + 0x51;
+constexpr UINT kRefreshMessage = WM_APP + 0x52;
 constexpr std::size_t kMaximumDataUrlLength = 32 * 1024 * 1024;
 constexpr std::uint64_t kMaximumDecodedBytes = 64 * 1024 * 1024;
 constexpr UINT kMaximumImageDimension = 8192;
@@ -301,6 +302,12 @@ struct WindowState {
   std::wstring hide_tooltip;
   std::wstring relocate_tooltip;
   Control pressed_control = Control::kNone;
+  POINT drag_start_cursor{};
+  POINT drag_last_cursor{};
+  RECT drag_start_window{};
+  bool dragging = false;
+  bool drag_moved = false;
+  bool manually_positioned = false;
 };
 
 TOOLINFOW tooltip_info(
@@ -362,6 +369,57 @@ Control hit_test_control(const WindowState& state, POINT point) {
   return Control::kNone;
 }
 
+bool try_work_area_for_point(POINT point, RECT& work_area) {
+  const HMONITOR monitor =
+      MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (monitor == nullptr || !GetMonitorInfoW(monitor, &info)) return false;
+  work_area = info.rcWork;
+  return true;
+}
+
+bool try_work_area_for_window(HWND window, RECT& work_area) {
+  const HMONITOR monitor =
+      MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (monitor == nullptr || !GetMonitorInfoW(monitor, &info)) return false;
+  work_area = info.rcWork;
+  return true;
+}
+
+RECT clamp_frame_origin(RECT frame, const RECT& work_area) {
+  const LONG width = std::max<LONG>(1, frame.right - frame.left);
+  const LONG height = std::max<LONG>(1, frame.bottom - frame.top);
+  const LONG maximum_x =
+      std::max(work_area.left, work_area.right - width);
+  const LONG maximum_y =
+      std::max(work_area.top, work_area.bottom - height);
+  frame.left = std::clamp(frame.left, work_area.left, maximum_x);
+  frame.top = std::clamp(frame.top, work_area.top, maximum_y);
+  frame.right = frame.left + width;
+  frame.bottom = frame.top + height;
+  return frame;
+}
+
+bool drag_changed_window_origin(const WindowState& state) {
+  RECT frame{};
+  return state.dragging &&
+         (state.drag_moved ||
+          (GetWindowRect(state.window, &frame) &&
+           (frame.left != state.drag_start_window.left ||
+            frame.top != state.drag_start_window.top)));
+}
+
+bool finish_window_drag(WindowState& state) {
+  const bool moved = drag_changed_window_origin(state);
+  if (moved) state.manually_positioned = true;
+  state.dragging = false;
+  state.drag_moved = false;
+  return moved;
+}
+
 LRESULT CALLBACK overlay_window_proc(
     HWND window,
     UINT message,
@@ -387,10 +445,58 @@ LRESULT CALLBACK overlay_window_proc(
             static_cast<short>(HIWORD(lparam)),
         };
         state->pressed_control = hit_test_control(*state, point);
-        if (state->pressed_control != Control::kNone) SetCapture(window);
+        if (state->pressed_control != Control::kNone) {
+          SetCapture(window);
+          return 0;
+        }
+        if (GetCursorPos(&state->drag_start_cursor) &&
+            GetWindowRect(window, &state->drag_start_window)) {
+          state->drag_last_cursor = state->drag_start_cursor;
+          state->dragging = true;
+          state->drag_moved = false;
+          SetCapture(window);
+        }
+        return 0;
+      }
+      case WM_MOUSEMOVE: {
+        if (!state->dragging || (wparam & MK_LBUTTON) == 0) return 0;
+        POINT cursor{};
+        RECT work_area{};
+        if (!GetCursorPos(&cursor) ||
+            !try_work_area_for_point(cursor, work_area)) {
+          return 0;
+        }
+        const LONG delta_x = cursor.x - state->drag_start_cursor.x;
+        const LONG delta_y = cursor.y - state->drag_start_cursor.y;
+        RECT frame = state->drag_start_window;
+        OffsetRect(&frame, delta_x, delta_y);
+        frame = clamp_frame_origin(frame, work_area);
+        RECT current{};
+        const bool already_positioned =
+            GetWindowRect(window, &current) &&
+            current.left == frame.left && current.top == frame.top;
+        const bool positioned = already_positioned ||
+            SetWindowPos(
+                window,
+                HWND_TOPMOST,
+                frame.left,
+                frame.top,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOACTIVATE);
+        if (positioned) {
+          state->drag_last_cursor = cursor;
+          if (!already_positioned) state->drag_moved = true;
+        }
         return 0;
       }
       case WM_LBUTTONUP: {
+        if (state->dragging) {
+          const bool moved = finish_window_drag(*state);
+          if (GetCapture() == window) ReleaseCapture();
+          if (moved) PostMessageW(window, kRefreshMessage, 0, 0);
+          return 0;
+        }
         const POINT point{
             static_cast<short>(LOWORD(lparam)),
             static_cast<short>(HIWORD(lparam)),
@@ -408,6 +514,7 @@ LRESULT CALLBACK overlay_window_proc(
         } else if (
             released_control == Control::kRelocate &&
             state->events->relocate) {
+          state->manually_positioned = false;
           state->events->relocate(state->host_id);
         }
         return 0;
@@ -423,8 +530,16 @@ LRESULT CALLBACK overlay_window_proc(
         }
         return 0;
       }
-      case WM_CAPTURECHANGED:
+      case WM_CAPTURECHANGED: {
+        const bool moved = finish_window_drag(*state);
         state->pressed_control = Control::kNone;
+        if (moved) PostMessageW(window, kRefreshMessage, 0, 0);
+        return 0;
+      }
+      case kRefreshMessage:
+        if (state->events != nullptr && state->events->refresh) {
+          state->events->refresh();
+        }
         return 0;
       case WM_ERASEBKGND:
         return 1;
@@ -558,10 +673,13 @@ RECT work_area_for_host(const OverlayHost& host) {
   return info.rcWork;
 }
 
-double scale_for_host(const OverlayHost& host) {
-  const HWND host_window = reinterpret_cast<HWND>(host.window_handle);
-  const UINT dpi = IsWindow(host_window) ? GetDpiForWindow(host_window) : 96;
+double scale_for_window(HWND window) {
+  const UINT dpi = IsWindow(window) ? GetDpiForWindow(window) : 96;
   return (dpi == 0 ? 96U : dpi) / 96.0;
+}
+
+double scale_for_host(const OverlayHost& host) {
+  return scale_for_window(reinterpret_cast<HWND>(host.window_handle));
 }
 
 SIZE fitted_size(
@@ -599,6 +717,20 @@ SIZE fitted_size(
       work_height,
       std::max(1, static_cast<int>(std::floor(image_height * scale))));
   return {width, height};
+}
+
+SIZE panel_size(
+    SIZE content,
+    double scale_factor,
+    const RECT& work_area) {
+  return {
+      std::min<LONG>(
+          work_area.right - work_area.left,
+          std::max<LONG>(content.cx, scaled_pixels(64, scale_factor))),
+      std::min<LONG>(
+          work_area.bottom - work_area.top,
+          std::max<LONG>(content.cy, scaled_pixels(64, scale_factor))),
+  };
 }
 
 LONG clamped_coordinate(double value, LONG minimum, LONG maximum) {
@@ -666,6 +798,8 @@ struct DecodedBitmap {
   UniqueBitmap bitmap;
   int width = 0;
   int height = 0;
+  UINT source_width = 0;
+  UINT source_height = 0;
 };
 
 struct RenderItem {
@@ -881,24 +1015,15 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
       throw std::runtime_error("overlay image dimensions exceed the limit");
     }
 
-    const SIZE content_size =
-        fitted_size(
-            image_width,
-            image_height,
-            host,
-            max_size,
-            scale_factor,
-            work_area);
-    const SIZE target_size{
-        std::min<LONG>(
-            work_area.right - work_area.left,
-            std::max<LONG>(
-                content_size.cx, scaled_pixels(64, scale_factor))),
-        std::min<LONG>(
-            work_area.bottom - work_area.top,
-            std::max<LONG>(
-                content_size.cy, scaled_pixels(64, scale_factor))),
-    };
+    const SIZE content_size = fitted_size(
+        image_width,
+        image_height,
+        host,
+        max_size,
+        scale_factor,
+        work_area);
+    const SIZE target_size =
+        panel_size(content_size, scale_factor, work_area);
     ComPtr<IWICBitmapScaler> scaler;
     ComPtr<IWICFormatConverter> converter;
     require_hresult(
@@ -974,7 +1099,13 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
         target_size.cx,
         target_size.cy,
         scale_factor);
-    return {std::move(bitmap), target_size.cx, target_size.cy};
+    return {
+        std::move(bitmap),
+        target_size.cx,
+        target_size.cy,
+        image_width,
+        image_height,
+    };
   }
 
   void draw_app_icon(
@@ -1158,9 +1289,9 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
       throw_windows_error("SelectObject");
     }
 
-    const POINT destination{item.frame.left, item.frame.top};
-    const POINT source{0, 0};
-    const SIZE size{item.image.width, item.image.height};
+    POINT destination{item.frame.left, item.frame.top};
+    POINT source{0, 0};
+    SIZE size{item.image.width, item.image.height};
     BLENDFUNCTION blend{};
     blend.BlendOp = AC_SRC_OVER;
     blend.SourceConstantAlpha = 255;
@@ -1228,32 +1359,78 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
       item.relocate_tooltip =
           wide_string(snapshot.options.relocate_tooltip);
       item.scale_factor = layout->second.scale_factor;
+      const auto existing = windows_.find(presentation.id);
+      bool preserve_position = false;
+      RECT current_frame{};
+      POINT update_cursor{};
+      bool update_cursor_valid = false;
+      RECT item_work_area = layout->second.work_area;
+      if (existing != windows_.end() &&
+          existing->second->window != nullptr &&
+          IsWindow(existing->second->window) &&
+          GetWindowRect(existing->second->window, &current_frame)) {
+        if (existing->second->dragging) {
+          update_cursor = existing->second->drag_last_cursor;
+          update_cursor_valid = true;
+        }
+        preserve_position = existing->second->manually_positioned ||
+                            drag_changed_window_origin(*existing->second);
+        if (preserve_position) {
+          try_work_area_for_window(
+              existing->second->window, item_work_area);
+          item.scale_factor = scale_for_window(existing->second->window);
+        }
+      }
       item.image = decode_bitmap(
           presentation.image_data,
           presentation.app_icon_path,
           *host->second,
           snapshot.max_size,
+          item.scale_factor,
+          item_work_area);
+      const bool eligible = presentation.visible && snapshot.visible;
+      const SIZE stack_content_size = fitted_size(
+          item.image.source_width,
+          item.image.source_height,
+          *host->second,
+          snapshot.max_size,
           layout->second.scale_factor,
           layout->second.work_area);
-      item.frame = presentation_frame(
+      const SIZE stack_size = panel_size(
+          stack_content_size,
+          layout->second.scale_factor,
+          layout->second.work_area);
+      const bool stack_slot_fits = presentation_fits(
           *host->second,
-          {item.image.width, item.image.height},
+          stack_size,
           layout->second.cursor,
           layout->second.scale_factor,
           layout->second.work_area);
-      item.visible = presentation.visible && snapshot.visible &&
-                     presentation_fits(
-                         *host->second,
-                         {item.image.width, item.image.height},
-                         layout->second.cursor,
-                         layout->second.scale_factor,
-                         layout->second.work_area);
-      if (item.visible) {
+      if (preserve_position) {
+        current_frame.right = current_frame.left + item.image.width;
+        current_frame.bottom = current_frame.top + item.image.height;
+        item.frame = clamp_frame_origin(current_frame, item_work_area);
+        item.visible = eligible;
+      } else {
+        item.frame = presentation_frame(
+            *host->second,
+            {item.image.width, item.image.height},
+            layout->second.cursor,
+            layout->second.scale_factor,
+            layout->second.work_area);
+        item.visible = eligible && stack_slot_fits;
+      }
+      if (existing != windows_.end() && existing->second->dragging &&
+          update_cursor_valid) {
+        existing->second->drag_start_window = item.frame;
+        existing->second->drag_start_cursor = update_cursor;
+      }
+      if (eligible && (stack_slot_fits || preserve_position)) {
         layout->second.cursor +=
             (host->second->anchor.edge == AnchorEdge::kLeading ||
              host->second->anchor.edge == AnchorEdge::kTrailing)
-                ? item.image.height + kStackGap * layout->second.scale_factor
-                : item.image.width + kStackGap * layout->second.scale_factor;
+                ? stack_size.cy + kStackGap * layout->second.scale_factor
+                : stack_size.cx + kStackGap * layout->second.scale_factor;
       }
       items.push_back(std::move(item));
     }

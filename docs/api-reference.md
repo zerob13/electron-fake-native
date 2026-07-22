@@ -36,6 +36,14 @@ Floating image panels with host, presentation, and session lifecycle. macOS
 panels join all Spaces. Windows panels are topmost on their current virtual
 desktop.
 
+The user can drag a panel by its visible surface outside the controls.
+Manual placement survives host and image updates, remains inside the selected
+display's work area, and retains its original anchor-stack slot so other panels
+do not jump during a drag.
+Clicking the relocate control clears manual placement for that panel and moves
+it to the host's next anchor edge. Removing the presentation or stopping the
+overlay discards the manual position; it is not persisted across launches.
+
 ### Types
 
 ```ts
@@ -178,7 +186,8 @@ overlay.on('visibilityRequest', (visible) => {
 })
 ```
 
-Overlay transitions are immediate. There is no partial animation API.
+Overlay movement and transitions are immediate. Dragging does not emit a public
+position event, and there is no partial animation API.
 
 ## `windows`
 

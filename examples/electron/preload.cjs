@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld(
     status: () => invoke('nativekit:status'),
     refreshWindows: () => invoke('nativekit:windows:refresh'),
     showOverlay: () => invoke('nativekit:overlay:show'),
+    pickOverlayImages: () => invoke('nativekit:overlay:pick'),
     hideOverlay: () => invoke('nativekit:overlay:hide'),
     pickApp: () => invoke('nativekit:apps:pick'),
     pickDragFile: () => invoke('nativekit:drag:pick'),

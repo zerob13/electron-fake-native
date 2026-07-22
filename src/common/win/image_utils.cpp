@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <ShlObj.h>
+#include <shellapi.h>
 #include <Wincrypt.h>
 #include <wincodec.h>
 #include <wrl/client.h>

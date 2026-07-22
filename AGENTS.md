@@ -35,7 +35,6 @@ js/
 docs/
   architecture.md             # design, cross-platform strategy, layout
   api-reference.md            # full JS API
-  roadmap.md                 # phased plan
 package.json
 CMakeLists.txt
 binding.gyp
