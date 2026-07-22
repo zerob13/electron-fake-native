@@ -33,8 +33,8 @@ interface Rect extends Point {
 ## `overlay`
 
 Floating image panels with host, presentation, and session lifecycle. macOS
-panels join all Spaces. Windows panels are topmost on their current virtual
-desktop.
+panels join all Spaces. Windows panels are owned by their host window and remain
+topmost on their current virtual desktop.
 
 The user can drag a panel by its visible surface outside the controls.
 Manual placement survives host and image updates, remains inside the selected
@@ -78,8 +78,9 @@ interface OverlayOptions {
 
 Pass `BrowserWindow.getContentBounds()` as `bounds` and
 `BrowserWindow.getNativeWindowHandle()` as `windowHandle`. Width and height
-constrain panel sizing; the native handle selects the correct display. Refresh
-the host after the BrowserWindow moves, resizes, or changes display.
+constrain panel sizing; the native handle selects the correct display and owns
+the panel on Windows. Refresh the host after the BrowserWindow moves, resizes,
+or changes display.
 
 `imageData` must be a PNG or JPEG base64 data URL no longer than 32 MiB. Decoded
 images are limited to 8192 pixels per dimension and 64 MiB of RGBA pixels.

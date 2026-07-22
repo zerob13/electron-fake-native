@@ -138,7 +138,7 @@ run prints one `NATIVEKIT_DEMO_SMOKE` JSON record and exits with status 0.
 
 | Capability | macOS | Windows |
 |---|---|---|
-| Overlay | draggable non-activating `NSPanel`, all Spaces | draggable layered topmost `HWND`, current virtual desktop |
+| Overlay | draggable non-activating `NSPanel`, all Spaces | draggable host-owned layered topmost `HWND`, current virtual desktop |
 | Window query | CoreGraphics + NSWorkspace | EnumWindows + DWM |
 | App icon | NSWorkspace | Shell + WIC |
 | Public coordinates | Electron DIP | native pixels normalized to Electron DIP |

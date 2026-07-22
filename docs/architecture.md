@@ -97,10 +97,12 @@ window level, and these collection behaviors:
 canJoinAllSpaces | stationary | ignoresCycle | fullScreenAuxiliary
 ```
 
-Windows uses one STA message-pump thread and per-presentation layered windows:
+Windows uses one STA message-pump thread and host-owned, per-presentation
+layered windows:
 
 ```text
-WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST
+CreateWindowEx(..., host HWND, ...)
 UpdateLayeredWindow(PBGRA) + HWND_TOPMOST
 ```
 
