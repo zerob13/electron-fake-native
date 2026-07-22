@@ -66,6 +66,7 @@ function attachOverlayHost() {
       tooltip: { hide: 'Hide', relocate: 'Move to next anchor' },
     })
     overlayStarted = true
+    traceSmoke('overlay-host:platform-ready')
   }
   overlay.attachHost({
     id: hostId,

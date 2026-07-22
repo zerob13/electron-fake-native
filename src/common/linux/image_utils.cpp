@@ -21,6 +21,7 @@ namespace {
 constexpr std::size_t kMaximumDataUrlLength = 32 * 1024 * 1024;
 constexpr std::uint64_t kMaximumDecodedBytes = 64 * 1024 * 1024;
 constexpr int kMaximumImageDimension = 8192;
+bool gtk_prepared = false;
 
 template <typename Type>
 struct GObjectDeleter {
@@ -214,18 +215,25 @@ PixbufPtr file_icon_pixbuf(const std::string& app_path, int pixels) {
 
 }  // namespace
 
-void require_gtk() {
-  static bool initialized = false;
-  if (initialized) return;
+bool prepare_gtk() {
+  if (gtk_prepared) return true;
   if (gdk_display_get_default() != nullptr) {
-    initialized = true;
-    return;
+    gtk_prepared = true;
+    return true;
   }
+  gdk_set_allowed_backends("x11");
   if (!gtk_init_check(nullptr, nullptr)) {
-    throw std::runtime_error(
-        "nativekit Linux support requires an available desktop display");
+    return false;
   }
-  initialized = true;
+  gtk_prepared = true;
+  return true;
+}
+
+void require_gtk() {
+  if (!prepare_gtk()) {
+    throw std::runtime_error(
+        "nativekit Linux support requires an available X11 display");
+  }
 }
 
 GdkPixbuf* pixbuf_from_data_url(const std::string& data_url) {
