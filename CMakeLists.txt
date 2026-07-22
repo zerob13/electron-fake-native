@@ -53,9 +53,10 @@ if(UNIX AND NOT APPLE)
     LINUX_DEPS
     REQUIRED
     IMPORTED_TARGET
-    gtk+-3.0
+    gdk-pixbuf-2.0
     gio-unix-2.0
     xcb
+    xcb-randr
   )
 endif()
 
@@ -130,7 +131,6 @@ endif()
 
 if(UNIX AND NOT APPLE)
   target_compile_definitions(nativekit PRIVATE
-    GDK_VERSION_MIN_REQUIRED=GDK_VERSION_3_22
     GLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_56
   )
   target_link_libraries(nativekit PRIVATE PkgConfig::LINUX_DEPS)

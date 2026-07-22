@@ -38,7 +38,7 @@ nativekit.node                        node-addon-api, N-API v8
         ├── shared managers           validation, state, event dispatch
         ├── macOS tail                AppKit / CoreGraphics
         ├── Windows tail              Win32 / WIC / Shell
-        └── Linux tail                GTK 3 / GIO / XCB
+        └── Linux tail                GIO / GdkPixbuf / XCB
 ```
 
 The TypeScript wrapper performs main-process checks, input validation, Promise
@@ -66,7 +66,7 @@ src/
     overlay_manager.*         host/session/presentation state
     mac/overlay_window.mm     NSPanel renderer and controls
     win/overlay_window.cpp    layered HWND renderer and message pump
-    linux/overlay_window.cpp  GTK utility-window renderer and controls
+    linux/overlay_window.cpp  XCB renderer, controls, and event thread
   windows/
     window_query.*            Node-API module boundary
     mac/window_query.mm       CGWindowList and NSWorkspace
@@ -110,20 +110,22 @@ CreateWindowEx(..., host HWND, ...)
 UpdateLayeredWindow(PBGRA) + HWND_TOPMOST
 ```
 
-Both tails preserve image aspect ratio, render an optional application-icon
-badge, provide hide/relocate tooltips, scale controls for DPI, skip suppressed
-items in stack layout, and hide overflow items rather than overlap them. A user
-drag moves the native window directly without renderer IPC. The platform tail
-then owns the presentation's manual origin, clamps it to the current work area,
-and keeps its anchor-stack slot stable until relocate clears that state.
-macOS panels can join all Spaces; Windows topmost windows remain on their current
-virtual desktop because Win32 has no supported equivalent.
+All tails preserve image aspect ratio, render an optional application-icon
+badge, scale controls, skip suppressed items in stack layout, and hide overflow
+items rather than overlap them. A user drag moves the native window directly
+without renderer IPC. The platform tail then owns the presentation's manual
+origin, clamps it to the current work area, and keeps its anchor-stack slot
+stable until relocate clears that state. macOS and Windows provide native
+hide/relocate hover tooltips; the first X11 renderer accepts the same strings
+but does not draw tooltip windows.
 
-Linux uses undecorated, non-focusing GTK utility windows on the Electron main
-thread. GDK X11 supplies transient-parent and monitor selection behavior while
-the window manager owns drag operations. The implementation asks the window
-manager for keep-above, taskbar/pager exclusion, and all-workspace behavior;
-EWMH window managers may apply workspace policy differently.
+Linux uses one dedicated XCB event thread and one undecorated, non-focusing
+utility window per presentation. XCB RandR selects the host monitor; EWMH
+properties request transient-parent, keep-above, taskbar/pager exclusion, and
+all-workspace behavior. Image decode and scaling use display-independent
+GdkPixbuf APIs. This avoids initializing GTK inside Electron and keeps X11
+round trips off the Electron UI thread. EWMH window managers may apply
+workspace policy differently.
 
 Native Wayland is deliberately excluded from `overlay`. Wayland clients cannot
 choose global top-level positions, and Electron's native handle contract for
@@ -149,9 +151,9 @@ Native Wayland does not provide the required global window model.
 `apps.icon()` resolves the operating-system icon and rasterizes it to exactly
 16×16 or 32×32 PNG pixels. macOS uses `NSWorkspace`; Windows uses Shell icon
 lookup plus WIC scaling and PNG encoding. Linux matches `.desktop` entries and
-executables through GIO, resolves the active GTK icon theme, and uses GdkPixbuf
-for exact-size PNG output. A generic file icon is the fallback for an existing
-path without an application entry.
+executables through GIO, searches installed freedesktop icon themes, and uses
+GdkPixbuf for exact-size PNG output. A generic file icon is the fallback for an
+existing path without an application entry.
 
 ## 5. Threading and cleanup
 
@@ -159,11 +161,11 @@ path without an application entry.
 Electron main/UI thread
   ├── shared managers and Node-API calls
   ├── AppKit overlay
-  ├── Linux GTK overlay
   └── ThreadSafeFunction delivery
 
 Native worker threads
-  └── Windows overlay message pump (STA)
+  ├── Windows overlay message pump (STA)
+  └── Linux XCB event loop
 ```
 
 The Node environment cleanup hook calls independent `noexcept` cleanup

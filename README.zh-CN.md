@@ -100,11 +100,12 @@ Smoke 模式会集中验证窗口枚举、图标与 Overlay 渲染。
 ## 本地开发
 
 要求 Node.js 20.19+、pnpm 10、CMake 3.22+，以及 macOS 的 Xcode Command
-Line Tools、Windows 的 Visual Studio C++ Build Tools，或 Linux 的 GTK 3、
-GLib/GIO、XCB 与 `pkg-config` 开发包。Debian/Ubuntu 可安装：
+Line Tools、Windows 的 Visual Studio C++ Build Tools，或 Linux 的
+GLib/GIO、GdkPixbuf、XCB、XCB RandR 与 `pkg-config` 开发包。
+Debian/Ubuntu 可安装：
 
 ```bash
-sudo apt-get install build-essential pkg-config libgtk-3-dev libxcb1-dev
+sudo apt-get install build-essential pkg-config libgdk-pixbuf-2.0-dev libglib2.0-dev libxcb1-dev libxcb-randr0-dev
 ```
 
 ```bash

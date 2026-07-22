@@ -36,9 +36,9 @@ interface Rect extends Point {
 
 Floating image panels with host, presentation, and session lifecycle. macOS
 panels join all Spaces. Windows panels are owned by their host window and remain
-topmost on their current virtual desktop. Linux uses non-focusing GTK utility
-windows and requests keep-above, taskbar/pager exclusion, and all-workspace
-placement from the X11 window manager.
+topmost on their current virtual desktop. Linux uses non-focusing XCB utility
+windows on a dedicated X11 event thread and requests keep-above, taskbar/pager
+exclusion, and all-workspace placement from the window manager.
 
 Linux overlays do not support native Wayland. Electron must expose an X11
 `Window`, normally by starting with `--ozone-platform=x11`; otherwise
@@ -101,7 +101,8 @@ absolute `.desktop`, executable, AppImage, or file path on Linux.
 #### `overlay.start(options?: OverlayOptions): boolean`
 
 Start the platform renderer or update its tooltip options. Repeated calls are
-safe.
+safe. The first Linux X11 renderer draws the controls but does not display
+hover tooltips; the strings remain accepted for API symmetry.
 
 #### `overlay.stop(): boolean`
 
@@ -262,9 +263,9 @@ read. `small` is 16×16 and `medium` is 32×32.
 
 - macOS: absolute `.app` bundle or executable path.
 - Windows: absolute executable or file path understood by the Shell.
-- Linux: absolute `.desktop`, executable, AppImage, or file path. The active
-  desktop icon theme is used; an existing unmatched path may return a generic
-  file icon.
+- Linux: absolute `.desktop`, executable, AppImage, or file path. Installed
+  freedesktop icon themes are searched; an existing unmatched path may return
+  a generic file icon.
 
 ```ts
 const icon = await apps.icon('/Applications/Safari.app', { size: 'medium' })

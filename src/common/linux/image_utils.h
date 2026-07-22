@@ -21,7 +21,4 @@ std::optional<std::string> icon_to_png_data_url(
     const std::string& app_path,
     int pixels);
 
-bool prepare_gtk();
-void require_gtk();
-
 }  // namespace nativekit::platform

@@ -79,14 +79,13 @@
             "src/windows/linux/window_query.cpp"
           ],
           "cflags": [
-            "<!@(pkg-config --cflags gtk+-3.0 gio-unix-2.0 xcb)"
+            "<!@(pkg-config --cflags gdk-pixbuf-2.0 gio-unix-2.0 xcb xcb-randr)"
           ],
           "defines": [
-            "GDK_VERSION_MIN_REQUIRED=GDK_VERSION_3_22",
             "GLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_56"
           ],
           "libraries": [
-            "<!@(pkg-config --libs gtk+-3.0 gio-unix-2.0 xcb)"
+            "<!@(pkg-config --libs gdk-pixbuf-2.0 gio-unix-2.0 xcb xcb-randr)"
           ]
         }]
       ]

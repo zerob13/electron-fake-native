@@ -18,7 +18,7 @@ context-isolated preload
 Electron main process
     │
     ▼
-@zerob13/nativekit → Node-API → AppKit / Win32 / GTK + XCB
+@zerob13/nativekit → Node-API → AppKit / Win32 / XCB
 ```
 
 建议目录：
@@ -242,7 +242,7 @@ const icon = await apps.icon(applicationPath, { size: 'medium' })
 返回值是精确 16×16（`small`）或 32×32（`medium`）PNG data URL；无法读取时是
 `null`。macOS 可传 `.app` 或其可执行文件绝对路径，Windows 传 Shell 可识别的
 文件绝对路径；Linux 可传 `.desktop`、可执行文件、AppImage 或其他文件的绝对
-路径，并通过 GIO 与当前 GTK 图标主题解析。找不到应用条目时可能返回通用文件图标。
+路径，并通过 GIO 与 freedesktop 图标主题解析。找不到应用条目时可能返回通用文件图标。
 
 ## 5. 打包 Electron 应用
 
@@ -301,5 +301,5 @@ pnpm demo:smoke
 | `no native binary for ...` | 缺少对应 prebuild，或打包时未复制/解包 `prebuilds/`。 |
 | `windowHandle has an unexpected size` | 修改了 Electron 返回的 Buffer；应原样传递。 |
 | `Linux window APIs require an available X11 display` | 当前是无显示环境或原生 Wayland；提供 `DISPLAY`，并以 `--ozone-platform=x11` 启动 Electron。 |
-| `overlays require Electron to use X11/XWayland` | GTK 当前连接到 Wayland backend；在创建窗口前切换 Electron Ozone backend。 |
+| `overlays require Electron to use X11/XWayland` | Electron 没有提供可验证的 X11 窗口句柄；在创建窗口前切换 Electron Ozone backend。 |
 | Overlay 回到锚点 | presentation 被删除重建、调用了 relocate，或重启了 Overlay。 |

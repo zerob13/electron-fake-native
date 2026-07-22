@@ -37,9 +37,19 @@ nativekit.node
   ├── shared Node-API managers
   └── Linux tail
       ├── windows: XCB + EWMH
-      ├── overlay: GTK 3 + GDK X11
-      └── apps: GIO desktop entries + GTK icon themes + GdkPixbuf
+      ├── overlay: XCB + EWMH + RandR, dedicated event thread
+      └── apps: GIO desktop entries + freedesktop icon themes + GdkPixbuf
 ```
+
+### CI-driven architecture amendment
+
+The first implementation attempted to embed GTK 3 on Electron's main thread.
+Native x64 and arm64 CI showed that initializing GTK before Chromium violated
+Chromium's initialization order and made later synchronous `BrowserWindow`
+queries deadlock. Initializing it from an Electron callback could deadlock the
+inverse path. The overlay was therefore changed to a dedicated XCB event thread
+with a separate X11 connection. GdkPixbuf remains for display-independent image
+decode and encode; the addon no longer initializes or links GTK.
 
 ### Window queries
 
@@ -60,10 +70,10 @@ handler.
 
 ### Application icons
 
-Resolve `.desktop` entries and executable matches through GIO, then use the
-active GTK icon theme. Fall back to the file's GIO icon for paths without a
-matching desktop entry. Rasterize through GdkPixbuf to the existing exact
-16×16 or 32×32 PNG data URL contract.
+Resolve `.desktop` entries and executable matches through GIO, then search
+installed freedesktop icon themes. Fall back to the file's GIO icon for paths
+without a matching desktop entry. Rasterize through GdkPixbuf to the existing
+exact 16×16 or 32×32 PNG data URL contract.
 
 Linux `appPath` will accept an absolute `.desktop`, executable, AppImage, or
 other file path. A generic file icon is an acceptable fallback when no desktop
@@ -71,34 +81,36 @@ entry identifies the application.
 
 ### Overlay
 
-Create one undecorated GTK top-level window per presentation on the Electron
-main thread. Each window will:
+Create one undecorated XCB top-level window per presentation on a dedicated X11
+event thread. Each window will:
 
 - stay above normal windows without accepting keyboard focus;
 - be hidden from taskbar and pager lists and request all-workspace visibility;
 - preserve image aspect ratio and enforce the existing decode limits;
 - render the optional application icon and hide/relocate controls;
-- support double-click activation and window-manager-assisted dragging;
+- support double-click activation and direct pointer dragging;
 - retain and clamp manual placement to the selected monitor work area; and
 - use the Electron host X11 handle for monitor and transient-parent hints.
 
-GTK 3 is preferred over a new rendering or binding framework because Electron
-Linux already integrates a GLib event source, GTK provides the required X11
-window behavior, and GdkPixbuf covers PNG/JPEG decode and PNG encode without a
-second image stack.
+The XCB thread uses `ThreadSafeFunction` indirectly through the existing event
+dispatchers for every callback into JavaScript. It retains GdkPixbuf for
+PNG/JPEG decode and PNG encode without adding a second image stack. Hover
+tooltips are deferred in the first X11 renderer; the controls and configured
+strings remain API-compatible.
 
 ## 3. Build and package changes
 
 - Add Linux sources symmetrically to CMake and `binding.gyp`.
-- Discover `gtk+-3.0`, `gio-unix-2.0`, and `xcb` through `pkg-config`.
+- Discover `gdk-pixbuf-2.0`, `gio-unix-2.0`, `xcb`, and `xcb-randr` through
+  `pkg-config`.
 - Add `linux` to the npm OS allowlist and add a `build:linux` script.
 - Produce build artifacts named `linux-x64` and `linux-arm64`.
 - Document source-build packages for Debian/Ubuntu and equivalent development
   packages for other distributions.
 
-The Linux native addon will dynamically depend on GTK 3, GLib/GIO, GdkPixbuf,
-and XCB. These libraries are standard in the supported desktop sessions, but
-minimal/headless installations must install them explicitly.
+The Linux native addon will dynamically depend on GLib/GIO, GdkPixbuf, XCB,
+and XCB RandR. These libraries are standard in the supported desktop sessions,
+but minimal/headless installations must install them explicitly.
 
 ## 4. Build-only CI
 
@@ -106,7 +118,8 @@ Extend `.github/workflows/build.yml`; do not change `release.yml` in this work.
 The Linux jobs will use GitHub-hosted Ubuntu 22.04 x64 and arm64 runners. Each
 job will:
 
-1. install GTK 3/XCB development packages, Xvfb, Openbox, and X11 test tools;
+1. install GLib/GdkPixbuf/XCB development packages, Xvfb, Openbox, and X11
+   test tools;
 2. build the native addon and JavaScript package;
 3. start Xvfb, an EWMH window manager, and a fixture X11 client;
 4. run the current native integration suite;
@@ -140,5 +153,5 @@ will be dispatched again.
   but they must not silently change the shared API contract.
 - Linux prebuild publication remains disabled until runtime validation is done
   on real GNOME and KDE machines in addition to the build-only CI coverage.
-- Sandboxed Flatpak/Snap applications may require packaged GTK/X11 libraries
+- Sandboxed Flatpak/Snap applications may require packaged GIO/X11 libraries
   and filesystem permissions for desktop-entry or executable icon lookup.

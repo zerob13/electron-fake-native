@@ -13,7 +13,7 @@ and app icon extraction.
 - **Binding**: C++ via `node-addon-api` (N-API v8)
 - **Native tails**: macOS uses Objective-C++ (`.mm`) calling AppKit / CoreGraphics;
   Windows uses C++ (`.cpp`) calling Win32 / Shell; Linux uses C++ (`.cpp`)
-  calling GTK 3 / GIO / XCB.
+  calling GIO / GdkPixbuf / XCB.
 - **Build**: CMake + `cmake-js` (primary), `binding.gyp` / `node-gyp` (fallback)
 - **Distribution**: prebuilt `.node` binaries via `prebuildify`, resolved at
   runtime by `node-gyp-build`. Published to npm.
@@ -52,11 +52,12 @@ binding.gyp
   integrating with a framework that forbids it.
 - **Windows**: C++ with `windows.h`, DWM, Shell API, and WIC. Target Windows 10
   1809+.
-- **Linux**: C++ with GTK 3 / GDK X11, GIO, GdkPixbuf, and XCB/EWMH. Do not
+- **Linux**: C++ with GIO, GdkPixbuf, XCB/EWMH, and XCB RandR. Overlay windows
+  run on their dedicated X11 event thread. Do not
   claim native Wayland window enumeration or absolute overlay positioning.
 - **Object lifetime**: `Napi::ObjectWrap` owns native handles; destructors
-  release them. Never leak `NSWindow*`, `HWND`, GTK/GObject references, or XCB
-  connections.
+  release them. Never leak `NSWindow*`, `HWND`, GObject references, XCB
+  resources, or XCB connections.
 - **Error handling**: throw `Napi::Error` for JS-visible failures; never return
   garbage on partial failure. Fail fast on invalid input.
 
@@ -102,7 +103,8 @@ pnpm test
 Native build requires:
 - **macOS**: Xcode CLT, Swift toolchain (comes with Xcode)
 - **Windows**: Visual Studio Build Tools 2019+ (Desktop C++ workload)
-- **Linux**: GTK 3, GLib/GIO, XCB, and pkg-config development packages
+- **Linux**: GLib/GIO, GdkPixbuf, XCB, XCB RandR, and pkg-config development
+  packages
 - **Both**: Node.js 18+, CMake 3.22+
 
 ## CI / Release
@@ -130,8 +132,9 @@ See `docs/architecture.md` §9 for the distribution flow.
 **Don't**:
 - Don't introduce a third platform binding framework (no napi-rs, no Neon). The
   C++ + ObjC++/Win32 split is deliberate — see `docs/architecture.md` §2.
-- Don't call AppKit / GTK from non-UI threads. Marshal UI work to the main
-  thread; keep the existing Windows message-thread boundary intact.
+- Don't call AppKit from non-UI threads. Keep the Windows message-thread and
+  Linux X11 event-thread boundaries intact, and marshal their callbacks with
+  `Napi::ThreadSafeFunction`.
 - Don't add new top-level exports without updating `docs/api-reference.md`.
 - Don't commit secrets, tokens, or `.env` files.
 - Don't commit built `.node` binaries or `prebuilds/` — CI generates them.

@@ -103,12 +103,13 @@ Requirements:
 - CMake 3.22 or newer;
 - Xcode command-line tools on macOS; or
 - Visual Studio C++ Build Tools on Windows; or
-- GTK 3, GLib/GIO, XCB, and `pkg-config` development packages on Linux.
+- GLib/GIO, GdkPixbuf, XCB, XCB RandR, and `pkg-config` development packages
+  on Linux.
 
 Debian and Ubuntu source builds can install the Linux dependencies with:
 
 ```bash
-sudo apt-get install build-essential pkg-config libgtk-3-dev libxcb1-dev
+sudo apt-get install build-essential pkg-config libgdk-pixbuf-2.0-dev libglib2.0-dev libxcb1-dev libxcb-randr0-dev
 ```
 
 ```bash
@@ -154,9 +155,9 @@ prints one `NATIVEKIT_DEMO_SMOKE` JSON record and exits with status 0.
 
 | Capability | macOS | Windows | Linux X11/XWayland |
 |---|---|---|---|
-| Overlay | draggable non-activating `NSPanel`, all Spaces | draggable host-owned layered topmost `HWND`, current virtual desktop | draggable non-focusing GTK utility window, workspace behavior depends on the window manager |
+| Overlay | draggable non-activating `NSPanel`, all Spaces | draggable host-owned layered topmost `HWND`, current virtual desktop | draggable non-focusing XCB utility window on a dedicated X11 event thread; workspace behavior depends on the window manager |
 | Window query | CoreGraphics + NSWorkspace | EnumWindows + DWM | XCB + EWMH/ICCCM |
-| App icon | NSWorkspace | Shell + WIC | GIO desktop entries + GTK icon theme |
+| App icon | NSWorkspace | Shell + WIC | GIO desktop entries + freedesktop icon themes + GdkPixbuf |
 | Public coordinates | Electron DIP | native pixels normalized to Electron DIP | X11 root coordinates matching Electron's X11 window model |
 
 macOS arm64 has local native, demo, and visual verification. Windows code is
