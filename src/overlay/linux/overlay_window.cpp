@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -25,6 +27,12 @@ constexpr int kStackGap = 12;
 constexpr int kControlMargin = 6;
 constexpr int kIconMargin = 8;
 constexpr int kIconSize = 28;
+
+void trace_native(const char* step) {
+  if (std::getenv("NATIVEKIT_NATIVE_TRACE") == nullptr) return;
+  std::fprintf(stderr, "NATIVEKIT_NATIVE_TRACE %s\n", step);
+  std::fflush(stderr);
+}
 
 template <typename Type>
 struct GObjectDeleter {
@@ -462,6 +470,7 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
   ~LinuxOverlayPlatform() override { stop(); }
 
   void update(const OverlaySnapshot& snapshot) override {
+    trace_native("linux:update:start");
     std::unordered_map<std::string, const OverlayHost*> hosts;
     hosts.reserve(snapshot.hosts.size());
     for (const auto& host : snapshot.hosts) hosts.emplace(host.id, &host);
@@ -564,6 +573,7 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
       GdkWindow* window = gtk_widget_get_window(panel->second->window);
       if (window != nullptr) gdk_window_raise(window);
     }
+    trace_native("linux:update:ready");
   }
 
   void stop() override {
