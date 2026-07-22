@@ -96,35 +96,52 @@ jobs:
           wm_pid=$!
           fixture_pid=''
           cleanup() {
+            status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ]; then
+              cat /tmp/nativekit-openbox.log || true
+              cat /tmp/nativekit-xmessage.log 2>/dev/null || true
+              xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null || true
+              xprop -root _NET_CLIENT_LIST 2>/dev/null || true
+            fi
             if [ -n "$fixture_pid" ]; then kill "$fixture_pid" 2>/dev/null || true; fi
             kill "$wm_pid" 2>/dev/null || true
+            exit "$status"
           }
           trap cleanup EXIT
 
-          for attempt in $(seq 1 50); do
+          wm_ready=false
+          for attempt in $(seq 1 150); do
             if xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null \
-              | grep -q '_NET_SUPPORTING_WM_CHECK'; then
+              | grep -Eq '^_NET_SUPPORTING_WM_CHECK\(WINDOW\): window id # 0x[0-9a-f]+'; then
+              wm_ready=true
               break
             fi
+            kill -0 "$wm_pid"
             sleep 0.1
           done
-          xprop -root _NET_SUPPORTING_WM_CHECK \
-            | grep -q '_NET_SUPPORTING_WM_CHECK'
+          test "$wm_ready" = true
 
           xmessage -geometry 320x120+20+20 'nativekit CI fixture' \
             >/tmp/nativekit-xmessage.log 2>&1 &
           fixture_pid=$!
-          for attempt in $(seq 1 50); do
+          fixture_ready=false
+          for attempt in $(seq 1 150); do
             if xprop -root _NET_CLIENT_LIST 2>/dev/null \
               | grep -Eq '0x[0-9a-f]+'; then
+              fixture_ready=true
               break
             fi
+            kill -0 "$fixture_pid"
             sleep 0.1
           done
-          xprop -root _NET_CLIENT_LIST | grep -Eq '0x[0-9a-f]+'
+          test "$fixture_ready" = true
 
           pnpm check
-          timeout 90s pnpm exec electron examples/electron --smoke
+          ELECTRON_ENABLE_LOGGING=1 \
+            dbus-run-session -- \
+            timeout 90s \
+            pnpm exec electron examples/electron --smoke --disable-gpu
           EOF
 
       - name: Prepare N-API prebuild
