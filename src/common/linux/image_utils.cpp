@@ -217,6 +217,10 @@ PixbufPtr file_icon_pixbuf(const std::string& app_path, int pixels) {
 void require_gtk() {
   static bool initialized = false;
   if (initialized) return;
+  if (gdk_display_get_default() != nullptr) {
+    initialized = true;
+    return;
+  }
   if (!gtk_init_check(nullptr, nullptr)) {
     throw std::runtime_error(
         "nativekit Linux support requires an available desktop display");
