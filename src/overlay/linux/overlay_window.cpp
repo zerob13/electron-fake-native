@@ -12,8 +12,6 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <limits>
@@ -43,12 +41,6 @@ constexpr int kControlStroke = 2;
 constexpr int kIconMargin = 8;
 constexpr int kIconSize = 28;
 constexpr std::uint32_t kDoubleClickMilliseconds = 400;
-
-void trace_native(const char* step) {
-  if (std::getenv("NATIVEKIT_NATIVE_TRACE") == nullptr) return;
-  std::fprintf(stderr, "NATIVEKIT_NATIVE_TRACE %s\n", step);
-  std::fflush(stderr);
-}
 
 template <typename Type>
 struct GObjectDeleter {
@@ -500,7 +492,6 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
   ~LinuxOverlayPlatform() override { stop(); }
 
   void update(const OverlaySnapshot& snapshot) override {
-    trace_native("linux:update:start");
     std::uint64_t generation = 0;
     {
       std::lock_guard lock(mutex_);
@@ -522,7 +513,6 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
     if (failed_generation_ == generation) {
       throw std::runtime_error(last_update_error_);
     }
-    trace_native("linux:update:ready");
   }
 
   void stop() override {

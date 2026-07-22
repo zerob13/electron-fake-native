@@ -149,17 +149,12 @@ class Overlay extends EventEmitter {
   }
 
   attachHost(config: HostConfig): boolean {
-    traceNative('js:attach:start')
     assertMainProcess()
-    traceNative('js:attach:main-ready')
     requireRecord(config, 'config')
-    traceNative('js:attach:record-ready')
     requireNonEmptyString(config.id, 'config.id')
     requireNonEmptyString(config.title, 'config.title')
     requireRect(config.bounds, 'config.bounds')
-    traceNative('js:attach:bounds-ready')
     requireBuffer(config.windowHandle, 'config.windowHandle')
-    traceNative('js:attach:handle-ready')
     requireRecord(config.anchor, 'config.anchor')
     if (!['leading', 'trailing', 'top', 'bottom'].includes(config.anchor.edge)) {
       throw new TypeError(
@@ -167,7 +162,6 @@ class Overlay extends EventEmitter {
       )
     }
     requireNonNegative(config.anchor.offset, 'config.anchor.offset')
-    traceNative('js:attach:validated')
     return native.overlayAttachHost(config)
   }
 
@@ -335,12 +329,6 @@ native.overlayOnVisibilityRequest?.((visible) =>
 
 export default { overlay, windows, apps }
 
-function traceNative(step: string): void {
-  if (process.env.NATIVEKIT_NATIVE_TRACE) {
-    process.stderr.write(`NATIVEKIT_NATIVE_TRACE ${step}\n`)
-  }
-}
-
 function electronScreen(): ElectronScreen | null {
   if (process.platform !== 'win32' || !process.versions.electron) return null
   const electron = require('electron') as { screen?: ElectronScreen }
@@ -408,12 +396,8 @@ function requireAbsolutePath(
 }
 
 function requireBuffer(value: unknown, name: string): asserts value is Buffer {
-  traceNative('js:buffer:type-start')
   const isBuffer = Buffer.isBuffer(value)
-  traceNative('js:buffer:type-ready')
-  traceNative('js:buffer:length-start')
   const byteLength = isBuffer ? value.byteLength : 0
-  traceNative('js:buffer:length-ready')
   const expectedByteLength = process.platform === 'linux' ? 4 : 8
   if (!isBuffer || byteLength !== expectedByteLength) {
     throw new TypeError(

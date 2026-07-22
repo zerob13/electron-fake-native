@@ -30,10 +30,6 @@ let overlayRotationTimer = null
 let overlayStarted = false
 let boundsTimer = null
 
-function traceSmoke(step) {
-  if (smokeMode) process.stdout.write(`NATIVEKIT_DEMO_TRACE ${step}\n`)
-}
-
 function sendEvent(topic, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('nativekit:event', { topic, data })
@@ -60,20 +56,14 @@ function handle(channel, handler) {
 
 function attachOverlayHost() {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  traceSmoke('overlay-host:start')
   const windowHandle = mainWindow.getNativeWindowHandle()
-  traceSmoke('overlay-host:handle-ready')
   if (!overlayStarted) {
     overlay.start({
       tooltip: { hide: 'Hide', relocate: 'Move to next anchor' },
     })
     overlayStarted = true
-    traceSmoke('overlay-host:platform-ready')
   }
-  traceSmoke('overlay-host:attach-start')
-  traceSmoke('overlay-host:bounds-start')
   const bounds = mainWindow.getContentBounds()
-  traceSmoke('overlay-host:bounds-ready')
   overlay.attachHost({
     id: hostId,
     title: 'nativekit demo',
@@ -81,7 +71,6 @@ function attachOverlayHost() {
     windowHandle,
     anchor: { edge: 'trailing', offset: 24 },
   })
-  traceSmoke('overlay-host:ready')
 }
 
 function scheduleOverlayHostUpdate() {
@@ -236,13 +225,9 @@ async function windowSnapshot() {
 }
 
 async function runSmoke() {
-  traceSmoke('run:start')
   const snapshot = await windowSnapshot()
-  traceSmoke('run:windows')
   const icon = await apps.icon(process.execPath, { size: 'medium' })
-  traceSmoke('run:icon')
   const overlayState = showOverlay()
-  traceSmoke('run:overlay')
   if (!icon || snapshot.list.length === 0 || !overlayState.active) {
     throw new Error('Smoke validation returned an incomplete native result')
   }
@@ -339,9 +324,7 @@ function createWindow() {
   mainWindow.on('resize', scheduleOverlayHostUpdate)
   mainWindow.on('move', scheduleOverlayHostUpdate)
   mainWindow.once('ready-to-show', () => {
-    traceSmoke('window:ready-to-show')
     mainWindow.show()
-    traceSmoke('window:shown')
     setImmediate(attachOverlayHost)
   })
   mainWindow.on('closed', () => {
@@ -360,7 +343,6 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  traceSmoke('app:ready')
   registerIpc()
   wireNativeEvents()
   createWindow()

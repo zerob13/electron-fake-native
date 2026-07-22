@@ -143,7 +143,7 @@ jobs:
           test "$fixture_ready" = true
 
           pnpm check
-          ELECTRON_ENABLE_LOGGING=1 NATIVEKIT_NATIVE_TRACE=1 \
+          ELECTRON_ENABLE_LOGGING=1 \
             dbus-run-session -- \
             timeout 90s \
             pnpm exec electron examples/electron --smoke --disable-gpu

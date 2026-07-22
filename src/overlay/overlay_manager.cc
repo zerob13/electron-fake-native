@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <stdexcept>
@@ -18,12 +16,6 @@ namespace nativekit {
 namespace {
 
 constexpr std::size_t kMaximumImageDataLength = 32 * 1024 * 1024;
-
-void trace_native(const char* step) {
-  if (std::getenv("NATIVEKIT_NATIVE_TRACE") == nullptr) return;
-  std::fprintf(stderr, "NATIVEKIT_NATIVE_TRACE %s\n", step);
-  std::fflush(stderr);
-}
 
 AnchorEdge parse_edge(const std::string& edge) {
   if (edge == "leading") return AnchorEdge::kLeading;
@@ -167,13 +159,10 @@ class OverlayManager {
   }
 
   bool attach_host(OverlayHost host) {
-    trace_native("manager:attach:start");
     require_running();
     if (hosts_.find(host.id) == hosts_.end()) host_order_.push_back(host.id);
     hosts_.insert_or_assign(host.id, std::move(host));
-    trace_native("manager:attach:sync");
     sync();
-    trace_native("manager:attach:ready");
     return true;
   }
 
@@ -484,7 +473,6 @@ Napi::Value stop(const Napi::CallbackInfo& info) {
 
 Napi::Value attach_host(const Napi::CallbackInfo& info) {
   return invoke(info, [&] {
-    trace_native("napi:attach:start");
     if (info.Length() != 1 || !info[0].IsObject()) {
       throw std::invalid_argument("config must be an object");
     }
@@ -495,10 +483,7 @@ Napi::Value attach_host(const Napi::CallbackInfo& info) {
     host.bounds = parse_rect(config.Get("bounds"));
     host.window_handle = parse_window_handle(config.Get("windowHandle"));
     host.anchor = parse_anchor(config.Get("anchor"));
-    trace_native("napi:attach:parsed");
-    const bool attached = manager.attach_host(std::move(host));
-    trace_native("napi:attach:ready");
-    return attached;
+    return manager.attach_host(std::move(host));
   });
 }
 
