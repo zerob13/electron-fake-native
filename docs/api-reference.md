@@ -4,7 +4,7 @@
 > from the renderer process.
 
 ```ts
-import { overlay, windows, apps, drag, secureChannel } from 'nativekit'
+import { overlay, windows, apps, drag, secureChannel } from '@zerob13/nativekit'
 ```
 
 All async methods return Promises. Event subscriptions use the standard

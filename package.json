@@ -1,47 +1,84 @@
 {
-  "name": "nativekit",
+  "name": "@zerob13/nativekit",
   "version": "0.0.0",
-  "description": "Cross-platform native capabilities for Electron — overlays, window awareness, secure IPC, and more.",
-  "main": "js/index.js",
-  "types": "js/index.d.ts",
+  "description": "Cross-platform native capabilities for Electron: overlays, window awareness, isolated IPC, app icons, and file drag-out.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
   "scripts": {
     "install": "node-gyp-build",
-    "build": "cmake-js build",
+    "build": "pnpm build:js && pnpm build:native",
+    "build:js": "vite build && tsc -p tsconfig.build.json",
+    "build:native": "cmake-js build",
     "build:mac": "cmake-js build --arch=arm64 && cmake-js build --arch=x64",
     "build:win": "cmake-js build --arch=x64",
-    "prebuild": "prebuildify --napi",
-    "test": "echo \"no tests yet\" && exit 0"
+    "prebuild": "prebuildify --napi --strip",
+    "test": "vitest run",
+    "check": "pnpm build:js && tsc --noEmit && vitest run",
+    "prepack": "pnpm build:js"
   },
   "binary": {
-    "napi_versions": [8]
+    "napi_versions": [
+      8
+    ]
   },
   "files": [
-    "js/",
+    "dist/",
     "prebuilds/",
     "binding.gyp",
     "CMakeLists.txt",
-    "src/"
+    "src/",
+    "README.md",
+    "LICENSE"
   ],
-  "os": ["darwin", "win32"],
-  "cpu": ["arm64", "x64"],
+  "os": [
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.33.3",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zerob13/electron-fake-native.git"
+  },
   "keywords": [
     "electron",
     "native",
     "addon",
     "n-api",
     "overlay",
-    "pip",
     "window",
-    "xpc",
+    "ipc",
+    "drag-drop",
     "cross-platform"
   ],
   "license": "MIT",
+  "dependencies": {
+    "node-addon-api": "^8.9.0",
+    "node-gyp-build": "^4.8.4"
+  },
   "devDependencies": {
-    "node-addon-api": "^8.0.0",
-    "node-gyp-build": "^4.8.0",
-    "cmake-js": "^7.3.0",
-    "prebuildify": "^6.0.0",
-    "@types/node": "^20.0.0",
-    "electron": "^31.0.0"
+    "@types/node": "^26.1.1",
+    "cmake-js": "^8.0.0",
+    "electron": "^43.2.0",
+    "node-gyp": "^13.0.1",
+    "prebuildify": "^6.0.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }

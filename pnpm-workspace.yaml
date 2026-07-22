@@ -1,0 +1,6 @@
+packages:
+  - examples/*
+
+onlyBuiltDependencies:
+  - cmake-js
+  - electron

@@ -38,9 +38,9 @@ common desktop interactions fall through the cracks:
 ## Install
 
 ```bash
-npm install nativekit
+npm install @zerob13/nativekit
 # or
-pnpm add nativekit
+pnpm add @zerob13/nativekit
 ```
 
 Prebuilt binaries are shipped per platform/arch — no native toolchain required
@@ -48,7 +48,7 @@ for consumers.
 
 ```js
 // Electron main process
-import { overlay, windows, apps, drag, secureChannel } from 'nativekit'
+import { overlay, windows, apps, drag, secureChannel } from '@zerob13/nativekit'
 ```
 
 > `nativekit` is **main-process only**. Calling it from the renderer will throw.
@@ -59,7 +59,7 @@ import { overlay, windows, apps, drag, secureChannel } from 'nativekit'
 
 ```js
 const { app, BrowserWindow } = require('electron')
-const { overlay, windows } = require('nativekit')
+const { overlay, windows } = require('@zerob13/nativekit')
 
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ width: 800, height: 600 })

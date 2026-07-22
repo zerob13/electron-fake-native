@@ -1,73 +1,20 @@
-/**
- * nativekit — cross-platform native capabilities for Electron.
- * @module nativekit
- *
- * Main-process only. All methods throw if called from a renderer process.
- */
+/** Cross-platform native capabilities for the Electron main process. */
 
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
-import * as path from 'node:path'
-import * as fs from 'node:fs'
+import { dirname, isAbsolute, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { isMainThread } from 'node:worker_threads'
 
-// ---------------------------------------------------------------------------
-// Native addon loading
-// ---------------------------------------------------------------------------
-
-const require_ = createRequire(import.meta.url)
-
-function loadNative(): any {
-  // 1. prebuilds via node-gyp-build
-  try {
-    return require_('node-gyp-build')(path.resolve(__dirname, '..'))
-  } catch {
-    // fall through
-  }
-
-  // 2. dev build (cmake-js / node-gyp output)
-  const devPaths = [
-    path.resolve(__dirname, '..', 'build', 'Release', 'nativekit.node'),
-    path.resolve(__dirname, '..', 'build', 'Debug', 'nativekit.node'),
-  ]
-  for (const p of devPaths) {
-    if (fs.existsSync(p)) return require_(p)
-  }
-
-  // 3. Electron asar-unpacked fallback
-  const asarPath = path.resolve(
-    __dirname,
-    '..',
-    `prebuilds/${process.platform}-${process.arch}/nativekit.node`,
-  )
-  if (fs.existsSync(asarPath)) return require_(asarPath)
-
-  throw new Error(
-    `nativekit: no prebuilt binary for ${process.platform}-${process.arch}. ` +
-      'Run `pnpm build` to compile from source.',
-  )
+export interface Point {
+  x: number
+  y: number
 }
 
-const native: any = loadNative()
-
-// ---------------------------------------------------------------------------
-// Process guard
-// ---------------------------------------------------------------------------
-
-function assertMainThread(): void {
-  // Electron sets process.type === 'browser' in the main process.
-  // In plain Node, process.type is undefined — allow it for testing/dev.
-  const proc: any = process as any
-  if (proc.type && proc.type !== 'browser') {
-    throw new Error(
-      'nativekit must be used in the Electron main process, ' +
-        `but process.type is "${proc.type}".`,
-    )
-  }
+export interface Rect extends Point {
+  width: number
+  height: number
 }
-
-// ---------------------------------------------------------------------------
-// Type definitions
-// ---------------------------------------------------------------------------
 
 export interface AnchorConfig {
   edge: 'leading' | 'trailing' | 'top' | 'bottom'
@@ -77,7 +24,7 @@ export interface AnchorConfig {
 export interface HostConfig {
   id: string
   title: string
-  bounds: { x: number; y: number; width: number; height: number }
+  bounds: Rect
   windowHandle: Buffer
   anchor: AnchorConfig
   animated?: boolean
@@ -91,13 +38,16 @@ export interface ImageFrame {
 }
 
 export interface OverlayOptions {
-  tooltip?: { hide?: string; relocate?: string }
+  tooltip?: {
+    hide?: string
+    relocate?: string
+  }
 }
 
 export interface SystemWindow {
   id: number
   name: string | null
-  bounds: { x: number; y: number; width: number; height: number }
+  bounds: Rect
   level: number
   ownerPid: number
   ownerName: string | null
@@ -114,253 +64,298 @@ export interface FrontmostWindow {
 export interface DragConfig {
   files: string[]
   windowHandle: Buffer
-  position: { x: number; y: number }
+  position: Point
 }
 
-// ---------------------------------------------------------------------------
-// Overlay
-// ---------------------------------------------------------------------------
+export interface DragResult extends Point {
+  dropped: boolean
+}
+
+interface NativeBinding {
+  overlayStart(options: OverlayOptions): boolean
+  overlayStop(): boolean
+  overlayAttachHost(config: HostConfig): boolean
+  overlayDetachHost(hostId: string): boolean
+  overlaySetVisible(visible: boolean): boolean
+  overlaySetMaxSize(size: number): boolean
+  overlayPushImage(frame: ImageFrame): boolean
+  overlayRemoveImage(presentationId: string): boolean
+  overlayCompleteSession(sessionId: string): boolean
+  overlayInvalidateSession(sessionId: string, presentationId: string): boolean
+  overlaySuppressSessions(sessionIds: string[]): boolean
+  overlaySetActiveSession(sessionId: string): boolean
+  overlayHasActive(): boolean
+  overlayHasAny(): boolean
+  overlayOnMaxSizeChanged?(callback: (size: number) => void): void
+  overlayOnActivate?(callback: () => void): void
+  overlayOnVisibilityRequest?(callback: (visible: boolean) => void): void
+  overlayOnCursor?(callback: (position: Point & { active: boolean }) => void): void
+
+  windowsFrontmost(): FrontmostWindow | null
+  windowsList(relativeTo: number): SystemWindow[]
+  windowsFind(id: number): SystemWindow | null
+  windowsAtPoint(point: Point, belowId: number): SystemWindow | null
+
+  secureChannelSpawn(executablePath: string): number | null
+  secureChannelVerify(pid: number, executablePath: string): boolean
+  secureChannelWasTerminatedByPrivacy(): boolean
+  secureChannelOnData?(callback: (payload: Buffer) => void): void
+  secureChannelOnExit?(callback: (code: number) => void): void
+
+  appsIcon(appPath: string, size: 'small' | 'medium'): string | null
+
+  dragStart(config: DragConfig): boolean
+  dragOnEnded?(callback: (result: DragResult) => void): void
+}
+
+const modulePath =
+  typeof import.meta.url === 'string'
+    ? fileURLToPath(import.meta.url)
+    : __filename
+const require = createRequire(modulePath)
+const packageRoot = resolve(dirname(modulePath), '..')
+
+function loadNative(): NativeBinding {
+  try {
+    const nodeGypBuild = require('node-gyp-build') as (
+      directory: string,
+    ) => NativeBinding
+    return nodeGypBuild(packageRoot)
+  } catch (cause) {
+    throw new Error(
+      `nativekit: no native binary for ${process.platform}-${process.arch}. ` +
+        'Install a published prebuild or run `pnpm build:native`.',
+      { cause },
+    )
+  }
+}
+
+function assertMainProcess(): void {
+  const electronProcess = process as NodeJS.Process & { type?: string }
+  if (
+    process.versions.electron &&
+    (electronProcess.type !== 'browser' || !isMainThread)
+  ) {
+    throw new Error(
+      'nativekit must run in the Electron main process; expose only the ' +
+        'operations you need to renderers through a context-isolated preload.',
+    )
+  }
+}
+
+assertMainProcess()
+const native = loadNative()
 
 class Overlay extends EventEmitter {
-  start(options?: OverlayOptions): boolean {
-    assertMainThread()
-    return native.overlayStart(options ?? {})
+  start(options: OverlayOptions = {}): boolean {
+    assertMainProcess()
+    validateOverlayOptions(options)
+    return native.overlayStart(options)
   }
 
   stop(): boolean {
-    assertMainThread()
+    assertMainProcess()
     return native.overlayStop()
   }
 
   attachHost(config: HostConfig): boolean {
-    assertMainThread()
+    assertMainProcess()
+    requireRecord(config, 'config')
     requireNonEmptyString(config.id, 'config.id')
+    requireNonEmptyString(config.title, 'config.title')
+    requireRect(config.bounds, 'config.bounds')
     requireBuffer(config.windowHandle, 'config.windowHandle')
+    requireRecord(config.anchor, 'config.anchor')
+    if (!['leading', 'trailing', 'top', 'bottom'].includes(config.anchor.edge)) {
+      throw new TypeError(
+        'config.anchor.edge must be leading, trailing, top, or bottom',
+      )
+    }
+    requireNonNegative(config.anchor.offset, 'config.anchor.offset')
+    if (config.animated !== undefined && typeof config.animated !== 'boolean') {
+      throw new TypeError('config.animated must be a boolean')
+    }
     return native.overlayAttachHost(config)
   }
 
   detachHost(hostId: string): boolean {
-    assertMainThread()
+    assertMainProcess()
     requireNonEmptyString(hostId, 'hostId')
     return native.overlayDetachHost(hostId)
   }
 
   setVisible(visible: boolean): boolean {
-    assertMainThread()
+    assertMainProcess()
+    requireBoolean(visible, 'visible')
     return native.overlaySetVisible(visible)
   }
 
   setMaxSize(size: number): boolean {
-    assertMainThread()
-    requireNonNegative(size, 'size')
+    assertMainProcess()
+    requirePositive(size, 'size')
     return native.overlaySetMaxSize(size)
   }
 
   pushImage(frame: ImageFrame): boolean {
-    assertMainThread()
+    assertMainProcess()
+    requireRecord(frame, 'frame')
     requireNonEmptyString(frame.presentationId, 'frame.presentationId')
     requireNonEmptyString(frame.sessionId, 'frame.sessionId')
     requireNonEmptyString(frame.imageData, 'frame.imageData')
+    if (!/^data:image\/(?:png|jpe?g);base64,/i.test(frame.imageData)) {
+      throw new TypeError('frame.imageData must be a PNG or JPEG data URL')
+    }
+    if (frame.appIconPath !== undefined && frame.appIconPath !== null) {
+      requireAbsolutePath(frame.appIconPath, 'frame.appIconPath')
+    }
     return native.overlayPushImage(frame)
   }
 
   removeImage(presentationId: string): boolean {
-    assertMainThread()
+    assertMainProcess()
     requireNonEmptyString(presentationId, 'presentationId')
     return native.overlayRemoveImage(presentationId)
   }
 
   completeSession(sessionId: string): boolean {
-    assertMainThread()
+    assertMainProcess()
     requireNonEmptyString(sessionId, 'sessionId')
     return native.overlayCompleteSession(sessionId)
   }
 
   invalidateSession(sessionId: string, presentationId: string): boolean {
-    assertMainThread()
+    assertMainProcess()
     requireNonEmptyString(sessionId, 'sessionId')
     requireNonEmptyString(presentationId, 'presentationId')
     return native.overlayInvalidateSession(sessionId, presentationId)
   }
 
   suppressSessions(sessionIds: string[]): boolean {
-    assertMainThread()
+    assertMainProcess()
     if (!Array.isArray(sessionIds)) {
       throw new TypeError('sessionIds must be an array')
     }
+    sessionIds.forEach((id, index) =>
+      requireNonEmptyString(id, `sessionIds[${index}]`),
+    )
     return native.overlaySuppressSessions(sessionIds)
   }
 
   setActiveSession(sessionId: string): boolean {
-    assertMainThread()
+    assertMainProcess()
     requireNonEmptyString(sessionId, 'sessionId')
     return native.overlaySetActiveSession(sessionId)
   }
 
   hasActive(): boolean {
-    assertMainThread()
+    assertMainProcess()
     return native.overlayHasActive()
   }
 
   hasAny(): boolean {
-    assertMainThread()
+    assertMainProcess()
     return native.overlayHasAny()
   }
 }
 
-// ---------------------------------------------------------------------------
-// Windows
-// ---------------------------------------------------------------------------
-
-class Windows extends EventEmitter {
+class Windows {
   frontmost(): Promise<FrontmostWindow | null> {
-    assertMainThread()
+    assertMainProcess()
     return Promise.resolve(native.windowsFrontmost())
   }
 
-  list(options?: { relativeTo?: number }): Promise<SystemWindow[]> {
-    assertMainThread()
-    return Promise.resolve(native.windowsList(options?.relativeTo ?? 0) ?? [])
+  list(options: { relativeTo?: number } = {}): Promise<SystemWindow[]> {
+    assertMainProcess()
+    if (options.relativeTo !== undefined) {
+      requireWindowId(options.relativeTo, 'options.relativeTo')
+    }
+    return Promise.resolve(native.windowsList(options.relativeTo ?? 0))
   }
 
   find(id: number): Promise<SystemWindow | null> {
-    assertMainThread()
+    assertMainProcess()
+    requireWindowId(id, 'id')
     return Promise.resolve(native.windowsFind(id))
   }
 
   atPoint(
-    point: { x: number; y: number },
-    options?: { belowId?: number },
+    point: Point,
+    options: { belowId?: number } = {},
   ): Promise<SystemWindow | null> {
-    assertMainThread()
-    if (typeof point?.x !== 'number' || typeof point?.y !== 'number') {
-      throw new TypeError('point.x and point.y must be numbers')
+    assertMainProcess()
+    requirePoint(point, 'point')
+    if (options.belowId !== undefined) {
+      requireWindowId(options.belowId, 'options.belowId')
     }
-    return Promise.resolve(native.windowsAtPoint(point, options?.belowId ?? 0))
+    return Promise.resolve(native.windowsAtPoint(point, options.belowId ?? 0))
   }
 }
 
-// ---------------------------------------------------------------------------
-// SecureChannel
-// ---------------------------------------------------------------------------
-
 class SecureChannel extends EventEmitter {
   spawn(executablePath: string): Promise<number | null> {
-    assertMainThread()
-    requireNonEmptyString(executablePath, 'executablePath')
+    assertMainProcess()
+    requireAbsolutePath(executablePath, 'executablePath')
     return Promise.resolve(native.secureChannelSpawn(executablePath))
   }
 
   verify(pid: number, executablePath: string): Promise<boolean> {
-    assertMainThread()
-    requireNonNegative(pid, 'pid')
-    requireNonEmptyString(executablePath, 'executablePath')
+    assertMainProcess()
+    requirePositiveInteger(pid, 'pid')
+    requireAbsolutePath(executablePath, 'executablePath')
     return Promise.resolve(native.secureChannelVerify(pid, executablePath))
   }
 
   wasTerminatedByPrivacy(): boolean {
-    assertMainThread()
+    assertMainProcess()
     return native.secureChannelWasTerminatedByPrivacy()
   }
 }
 
-// ---------------------------------------------------------------------------
-// Apps
-// ---------------------------------------------------------------------------
-
 class Apps {
   icon(
     appPath: string,
-    options?: { size?: 'small' | 'medium' },
+    options: { size?: 'small' | 'medium' } = {},
   ): Promise<string | null> {
-    assertMainThread()
-    requireNonEmptyString(appPath, 'appPath')
-    return Promise.resolve(
-      native.appsIcon(appPath, options?.size ?? 'small'),
-    )
+    assertMainProcess()
+    requireAbsolutePath(appPath, 'appPath')
+    const size = options.size ?? 'small'
+    if (size !== 'small' && size !== 'medium') {
+      throw new TypeError('options.size must be small or medium')
+    }
+    return Promise.resolve(native.appsIcon(appPath, size))
   }
 }
-
-// ---------------------------------------------------------------------------
-// Drag
-// ---------------------------------------------------------------------------
 
 class Drag extends EventEmitter {
+  private active = false
+
   start(config: DragConfig): Promise<void> {
-    assertMainThread()
-    if (!Array.isArray(config.files) || config.files.length === 0) {
-      throw new TypeError('config.files must be a non-empty array')
+    assertMainProcess()
+    validateDragConfig(config)
+    if (this.active) {
+      return Promise.reject(new Error('nativekit: a drag session is active'))
     }
-    requireBuffer(config.windowHandle, 'config.windowHandle')
-    return Promise.resolve(native.dragStart(config))
-  }
-}
 
-// ---------------------------------------------------------------------------
-// Validation helpers
-// ---------------------------------------------------------------------------
+    this.active = true
+    return new Promise<void>((resolvePromise, rejectPromise) => {
+      const onEnded = (): void => {
+        this.active = false
+        resolvePromise()
+      }
+      this.once('ended', onEnded)
 
-function requireNonEmptyString(value: unknown, name: string): void {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new TypeError(`${name} must be a non-empty string`)
-  }
-}
-
-function requireBuffer(value: unknown, name: string): void {
-  if (!Buffer.isBuffer(value)) {
-    throw new TypeError(`${name} must be a Buffer (use getNativeWindowHandle())`)
-  }
-}
-
-function requireNonNegative(value: unknown, name: string): void {
-  if (typeof value !== 'number' || value < 0 || !Number.isFinite(value)) {
-    throw new TypeError(`${name} must be a non-negative finite number`)
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Wire native events → EventEmitter
-// ---------------------------------------------------------------------------
-
-// The native addon calls these registration functions to install callbacks.
-// We bridge them into the EventEmitter pattern.
-;[
-  ['overlayOnMaxSizeChanged', 'overlay', 'maxSizeChanged'] as const,
-  ['overlayOnActivate', 'overlay', 'activate'] as const,
-  ['overlayOnVisibilityRequest', 'overlay', 'visibilityRequest'] as const,
-  ['overlayOnCursor', 'overlay', 'cursor'] as const,
-].forEach(([registerFn, _module, event]) => {
-  if (typeof native[registerFn] === 'function') {
-    native[registerFn]((...args: unknown[]) => {
-      overlay.emit(event as string, ...args)
+      try {
+        if (!native.dragStart(config)) {
+          throw new Error('nativekit: the native drag session did not start')
+        }
+      } catch (error) {
+        this.off('ended', onEnded)
+        this.active = false
+        rejectPromise(error)
+      }
     })
   }
-})
-
-;[
-  ['secureChannelOnData', 'secureChannel', 'data'] as const,
-  ['secureChannelOnExit', 'secureChannel', 'event:exit'] as const,
-].forEach(([registerFn, _module, event]) => {
-  if (typeof native[registerFn] === 'function') {
-    native[registerFn]((...args: unknown[]) => {
-      secureChannel.emit(event as string, ...args)
-    })
-  }
-})
-
-;[
-  ['dragOnEnded', 'drag', 'ended'] as const,
-].forEach(([registerFn, _module, event]) => {
-  if (native[registerFn] !== undefined) {
-    native[registerFn]((...args: unknown[]) => {
-      drag.emit(event as string, ...args)
-    })
-  }
-})
-
-// ---------------------------------------------------------------------------
-// Exports
-// ---------------------------------------------------------------------------
+}
 
 export const overlay = new Overlay()
 export const windows = new Windows()
@@ -368,10 +363,134 @@ export const secureChannel = new SecureChannel()
 export const apps = new Apps()
 export const drag = new Drag()
 
-export default {
-  overlay,
-  windows,
-  secureChannel,
-  apps,
-  drag,
+native.overlayOnMaxSizeChanged?.((size) =>
+  overlay.emit('maxSizeChanged', size),
+)
+native.overlayOnActivate?.(() => overlay.emit('activate'))
+native.overlayOnVisibilityRequest?.((visible) =>
+  overlay.emit('visibilityRequest', visible),
+)
+native.overlayOnCursor?.((position) => overlay.emit('cursor', position))
+native.secureChannelOnData?.((payload) =>
+  secureChannel.emit('data', payload),
+)
+native.secureChannelOnExit?.((code) => secureChannel.emit('exit', code))
+native.dragOnEnded?.((result) => drag.emit('ended', result))
+
+export default { overlay, windows, secureChannel, apps, drag }
+
+function validateOverlayOptions(options: OverlayOptions): void {
+  requireRecord(options, 'options')
+  if (options.tooltip === undefined) return
+  requireRecord(options.tooltip, 'options.tooltip')
+  if (options.tooltip.hide !== undefined) {
+    requireNonEmptyString(options.tooltip.hide, 'options.tooltip.hide')
+  }
+  if (options.tooltip.relocate !== undefined) {
+    requireNonEmptyString(
+      options.tooltip.relocate,
+      'options.tooltip.relocate',
+    )
+  }
+}
+
+function validateDragConfig(config: DragConfig): void {
+  requireRecord(config, 'config')
+  if (!Array.isArray(config.files) || config.files.length === 0) {
+    throw new TypeError('config.files must be a non-empty array')
+  }
+  config.files.forEach((file, index) =>
+    requireAbsolutePath(file, `config.files[${index}]`),
+  )
+  requireBuffer(config.windowHandle, 'config.windowHandle')
+  requirePoint(config.position, 'config.position')
+}
+
+function requireRecord(
+  value: unknown,
+  name: string,
+): asserts value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${name} must be an object`)
+  }
+}
+
+function requireNonEmptyString(
+  value: unknown,
+  name: string,
+): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError(`${name} must be a non-empty string`)
+  }
+}
+
+function requireAbsolutePath(
+  value: unknown,
+  name: string,
+): asserts value is string {
+  requireNonEmptyString(value, name)
+  if (!isAbsolute(value)) {
+    throw new TypeError(`${name} must be an absolute path`)
+  }
+}
+
+function requireBuffer(value: unknown, name: string): asserts value is Buffer {
+  if (!Buffer.isBuffer(value) || value.byteLength === 0) {
+    throw new TypeError(
+      `${name} must be the Buffer returned by getNativeWindowHandle()`,
+    )
+  }
+}
+
+function requireBoolean(
+  value: unknown,
+  name: string,
+): asserts value is boolean {
+  if (typeof value !== 'boolean') {
+    throw new TypeError(`${name} must be a boolean`)
+  }
+}
+
+function requireFiniteNumber(
+  value: unknown,
+  name: string,
+): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError(`${name} must be a finite number`)
+  }
+}
+
+function requireNonNegative(value: unknown, name: string): void {
+  requireFiniteNumber(value, name)
+  if (value < 0) throw new TypeError(`${name} must be non-negative`)
+}
+
+function requirePositive(value: unknown, name: string): void {
+  requireFiniteNumber(value, name)
+  if (value <= 0) throw new TypeError(`${name} must be positive`)
+}
+
+function requirePositiveInteger(value: unknown, name: string): void {
+  requireFiniteNumber(value, name)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${name} must be a positive safe integer`)
+  }
+}
+
+function requireWindowId(value: unknown, name: string): void {
+  requirePositiveInteger(value, name)
+}
+
+function requirePoint(value: unknown, name: string): asserts value is Point {
+  requireRecord(value, name)
+  requireFiniteNumber(value.x, `${name}.x`)
+  requireFiniteNumber(value.y, `${name}.y`)
+}
+
+function requireRect(value: unknown, name: string): asserts value is Rect {
+  requireRecord(value, name)
+  requireFiniteNumber(value.x, `${name}.x`)
+  requireFiniteNumber(value.y, `${name}.y`)
+  requirePositive(value.width, `${name}.width`)
+  requirePositive(value.height, `${name}.height`)
 }
