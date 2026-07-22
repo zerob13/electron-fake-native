@@ -40,6 +40,25 @@ if(WIN32)
   )
 endif()
 
+if(UNIX AND NOT APPLE)
+  list(APPEND NATIVEKIT_SOURCES
+    src/apps/linux/icon.cpp
+    src/common/linux/image_utils.cpp
+    src/overlay/linux/overlay_window.cpp
+    src/windows/linux/window_query.cpp
+  )
+
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(
+    LINUX_DEPS
+    REQUIRED
+    IMPORTED_TARGET
+    gtk+-3.0
+    gio-unix-2.0
+    xcb
+  )
+endif()
+
 execute_process(
   COMMAND node -p "require('node-addon-api').include_dir"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -107,6 +126,14 @@ if(WIN32)
     user32
     windowscodecs
   )
+endif()
+
+if(UNIX AND NOT APPLE)
+  target_compile_definitions(nativekit PRIVATE
+    GDK_VERSION_MIN_REQUIRED=GDK_VERSION_3_22
+    GLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_56
+  )
+  target_link_libraries(nativekit PRIVATE PkgConfig::LINUX_DEPS)
 endif()
 
 set_target_properties(nativekit PROPERTIES PREFIX "" SUFFIX ".node")
