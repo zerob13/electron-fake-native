@@ -135,7 +135,7 @@ std::optional<SystemWindow> find_window(WindowId id) {
   return parse_window(handle, level);
 }
 
-std::optional<SystemWindow> frontmost_window() {
+std::optional<FrontmostWindow> frontmost_window() {
   HWND handle = GetForegroundWindow();
   if (handle == nullptr) return std::nullopt;
   const auto system_window = parse_window(handle, 0);
