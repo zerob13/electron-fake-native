@@ -61,6 +61,8 @@ function handle(channel, handler) {
 function attachOverlayHost() {
   if (!mainWindow || mainWindow.isDestroyed()) return
   traceSmoke('overlay-host:start')
+  const windowHandle = mainWindow.getNativeWindowHandle()
+  traceSmoke('overlay-host:handle-ready')
   if (!overlayStarted) {
     overlay.start({
       tooltip: { hide: 'Hide', relocate: 'Move to next anchor' },
@@ -68,11 +70,12 @@ function attachOverlayHost() {
     overlayStarted = true
     traceSmoke('overlay-host:platform-ready')
   }
+  traceSmoke('overlay-host:attach-start')
   overlay.attachHost({
     id: hostId,
     title: 'nativekit demo',
     bounds: mainWindow.getContentBounds(),
-    windowHandle: mainWindow.getNativeWindowHandle(),
+    windowHandle,
     anchor: { edge: 'trailing', offset: 24 },
   })
   traceSmoke('overlay-host:ready')
