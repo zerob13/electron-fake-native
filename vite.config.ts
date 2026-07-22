@@ -10,7 +10,7 @@ const external = [
 
 export default defineConfig({
   build: {
-    target: 'node20',
+    target: 'node18',
     sourcemap: true,
     lib: {
       entry: resolve(import.meta.dirname, 'js/index.ts'),

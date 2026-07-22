@@ -1,103 +1,102 @@
-# API Reference
+# API reference
 
-> `nativekit` is **Electron main-process only**. All methods throw if called
-> from the renderer process.
+`@zerob13/nativekit` must be imported in the Electron main process. Renderer
+code should call a narrow, context-isolated preload API instead of importing the
+package directly.
 
 ```ts
-import { overlay, windows, apps, drag, secureChannel } from '@zerob13/nativekit'
+import { apps, drag, overlay, secureChannel, windows } from '@zerob13/nativekit'
 ```
 
-All async methods return Promises. Event subscriptions use the standard
-`.on(eventName, listener)` / `.off(eventName, listener)` pattern.
+Promise-returning methods currently wrap synchronous native results or native
+session completion. This keeps the JavaScript contract stable if more work moves
+off the main thread later.
 
----
+## Shared coordinates
 
-## Table of contents
+Every public point and rectangle uses Electron device-independent pixels (DIP)
+with a top-left screen origin. macOS points already use this model. On Windows,
+the wrapper converts between Electron DIP and native physical pixels.
 
-- [overlay](#overlay)
-- [windows](#windows)
-- [secureChannel](#securechannel)
-- [apps](#apps)
-- [drag](#drag)
+```ts
+interface Point {
+  x: number
+  y: number
+}
 
----
+interface Rect extends Point {
+  width: number
+  height: number
+}
+```
 
-## overlay
+## `overlay`
 
-Floating panel system. Panels persist across macOS Spaces and stack along
-screen edges. Windows panels are topmost on their current virtual desktop;
-Windows exposes no supported API for pinning a third-party window to every
-virtual desktop.
+Floating image panels with host, presentation, and session lifecycle. macOS
+panels join all Spaces. Windows panels are topmost on their current virtual
+desktop.
 
 ### Types
 
 ```ts
 interface AnchorConfig {
-  /** screen edge to attach to */
   edge: 'leading' | 'trailing' | 'top' | 'bottom'
-  /** distance from the edge in points */
   offset: number
 }
 
 interface HostConfig {
-  /** unique host id */
   id: string
-  /** panel title (for tooltip/accessibility) */
   title: string
-  /** content rect relative to the host window, in points */
-  bounds: { x: number; y: number; width: number; height: number }
-  /** Buffer returned by BrowserWindow.getNativeWindowHandle() */
+  bounds: Rect
   windowHandle: Buffer
-  /** screen-edge attachment */
   anchor: AnchorConfig
-  /** animate appearance (default true) */
-  animated?: boolean
 }
 
 interface ImageFrame {
-  /** target host; optional only while exactly one host is attached */
   hostId?: string
-  /** unique presentation id */
   presentationId: string
-  /** logical grouping; completing a session clears its presentations */
   sessionId: string
-  /** 'data:image/png;base64,...' (or jpg) */
   imageData: string
-  /** optional app icon path, rendered as a badge (macOS app path / Windows exe) */
   appIconPath?: string | null
 }
 
 interface OverlayOptions {
-  /** control tooltips */
-  tooltip?: { hide?: string; relocate?: string }
+  tooltip?: {
+    hide?: string
+    relocate?: string
+  }
 }
 ```
+
+Pass `BrowserWindow.getContentBounds()` as `bounds` and
+`BrowserWindow.getNativeWindowHandle()` as `windowHandle`. Width and height
+constrain panel sizing; the native handle selects the correct display. Refresh
+the host after the BrowserWindow moves, resizes, or changes display.
+
+`imageData` must be a PNG or JPEG base64 data URL no longer than 32 MiB. Decoded
+images are limited to 8192 pixels per dimension and 64 MiB of RGBA pixels.
+`appIconPath` is a `.app` path on macOS or executable path on Windows.
 
 ### Methods
 
 #### `overlay.start(options?: OverlayOptions): boolean`
 
-Initialize the overlay host system. Must be called once before `attachHost`.
-Returns `true` on success.
-
-```js
-overlay.start({ tooltip: { hide: 'Hide', relocate: 'Move' } })
-```
+Start the platform renderer or update its tooltip options. Repeated calls are
+safe.
 
 #### `overlay.stop(): boolean`
 
-Shut down the overlay system. Destroys all panels and hosts. Safe to call
-multiple times.
+Destroy every host and panel. Repeated calls are safe.
 
 #### `overlay.attachHost(config: HostConfig): boolean`
 
-Register an Electron `BrowserWindow` as an overlay origin.
+Add or update a BrowserWindow host. `id` is unique within the process.
 
-```js
+```ts
 overlay.attachHost({
   id: 'main',
   title: 'Assistant',
-  bounds: { x: 0, y: 0, width: 320, height: 200 },
+  bounds: win.getContentBounds(),
   windowHandle: win.getNativeWindowHandle(),
   anchor: { edge: 'trailing', offset: 16 },
 })
@@ -105,252 +104,232 @@ overlay.attachHost({
 
 #### `overlay.detachHost(hostId: string): boolean`
 
-Unregister a host and remove its panels.
+Remove a host and all of its presentations. Returns `false` when the host does
+not exist.
 
 #### `overlay.setVisible(visible: boolean): boolean`
 
-Show / hide the entire overlay stack.
+Show or hide all presentations without deleting them.
 
 #### `overlay.setMaxSize(size: number): boolean`
 
-Constrain the maximum display size (longest edge, in points) for panels.
+Set the maximum rendered panel edge in DIP. Emits `maxSizeChanged` after the new
+configured cap has been applied.
 
 #### `overlay.pushImage(frame: ImageFrame): boolean`
 
-Create or update a presentation with an image frame. Multiple frames with the
-same `presentationId` update the same panel.
+Create or update a presentation. `hostId` may be omitted only when exactly one
+host exists. An existing `presentationId` cannot move to another host or
+session. Invalid image data rejects the call without replacing the previous
+valid presentation.
 
-```js
+```ts
 overlay.pushImage({
   hostId: 'main',
-  presentationId: 'snap-1',
+  presentationId: 'snapshot-1',
   sessionId: 'task-42',
   imageData: 'data:image/png;base64,iVBORw0KGgo...',
-  appIconPath: '/Applications/Google Chrome.app',
+  appIconPath: '/Applications/Safari.app',
 })
 ```
 
 #### `overlay.removeImage(presentationId: string): boolean`
 
-Remove a single presentation.
+Remove one presentation. Returns `false` when it does not exist.
 
 #### `overlay.completeSession(sessionId: string): boolean`
 
-Mark a session complete; all presentations belonging to it are cleared.
+Remove every presentation in a session. Returns whether anything was removed.
 
 #### `overlay.invalidateSession(sessionId: string, presentationId: string): boolean`
 
-Invalidate a specific presentation within a session without completing the
-whole session.
+Remove one presentation only if it belongs to the supplied session.
 
 #### `overlay.suppressSessions(sessionIds: string[]): boolean`
 
-Suppress panels for the given sessions (they exist but are hidden).
+Replace the set of suppressed sessions. Suppressed items remain in state but do
+not occupy stack space.
 
 #### `overlay.setActiveSession(sessionId: string): boolean`
 
-Set the currently active session. The overlay stack shows the active
-session's content on top.
+Place a session first in presentation ordering.
 
 #### `overlay.hasActive(): boolean`
 
-Whether any presentation is currently visible.
+Whether at least one unsuppressed presentation is eligible to display while the
+overlay is globally visible.
 
 #### `overlay.hasAny(): boolean`
 
-Whether any presentation exists (visible or hidden).
+Whether any presentation exists, including suppressed or globally hidden ones.
 
 ### Events
 
-| Event | Listener signature | Fires when |
+| Event | Listener | Meaning |
 |---|---|---|
-| `maxSizeChanged` | `(size: number) => void` | Max display size changes (e.g. display reconfiguration). |
-| `activate` | `() => void` | User interacts to bring the app forward (double-click / tap on panel). |
-| `visibilityRequest` | `(visible: boolean) => void` | Overlay requests a visibility change. |
-| `cursor` | `(pos: { x: number; y: number; active: boolean }) => void` | Cursor position update from an isolated worker (automation mode). |
+| `maxSizeChanged` | `(size: number) => void` | `setMaxSize()` applied a new configured cap. |
+| `activate` | `() => void` | The user double-clicked a panel outside its controls. |
+| `visibilityRequest` | `(visible: boolean) => void` | A panel control requested global visibility change; currently hide emits `false`. |
 
-```js
-overlay.on('activate', () => mainWindow.show())
-overlay.on('maxSizeChanged', (size) => console.log('max size now', size))
+```ts
+overlay.on('activate', () => win.show())
+overlay.on('visibilityRequest', (visible) => {
+  if (!visible) overlay.setVisible(false)
+})
 ```
 
----
+Overlay transitions are immediate. There is no partial animation API.
 
-## windows
-
-System window enumeration and query. Build context-aware UI by knowing what the
-user is looking at.
+## `windows`
 
 ### Types
 
 ```ts
 interface SystemWindow {
-  /** OS window id */
   id: number
-  /** window title, if any */
   name: string | null
-  /** frame in global screen coordinates (points mac / px win) */
-  bounds: { x: number; y: number; width: number; height: number }
-  /** window level (z-order) */
+  bounds: Rect
   level: number
-  /** owning process id */
   ownerPid: number
-  /** owning app name, if any */
   ownerName: string | null
-  /** currently on-screen */
   isOnscreen: boolean
 }
 
 interface FrontmostWindow {
-  /** app bundle id (mac) / exe path (win) */
   bundleId: string
-  /** small app icon as data URL, or null */
   icon: string | null
-  /** app display name */
   name: string
-  /** frontmost window title, if any */
   title: string | null
 }
 ```
 
-### Methods
+`level` is the front-to-back z-order position; lower values are nearer the
+front. OS filtering can leave gaps. `isOnscreen` means visible, not minimized or
+cloaked, and intersecting a display. `bundleId` is a bundle identifier (or app
+path fallback) on macOS and the executable path on Windows.
 
 #### `windows.frontmost(): Promise<FrontmostWindow | null>`
 
-Return information about the currently frontmost application and its window.
-
-```js
-const f = await windows.frontmost()
-// { bundleId: 'com.google.Chrome', name: 'Google Chrome',
-//   title: 'GitHub', icon: 'data:image/png;base64,...' }
-```
+Return the foreground application, its best normal-window title, and a 32×32
+PNG icon when available.
 
 #### `windows.list(options?: { relativeTo?: number }): Promise<SystemWindow[]>`
 
-Enumerate all system windows. If `relativeTo` (a window id) is given, results
-are ordered relative to that window's z-order.
+Return a front-to-back snapshot including hidden windows. With `relativeTo`,
+the result starts below that window and excludes it and all windows above it.
+An unknown reference produces an empty array.
 
 #### `windows.find(id: number): Promise<SystemWindow | null>`
 
-Look up a single window by id.
+Resolve one current window snapshot by native id.
 
-#### `windows.atPoint(point: { x: number; y: number }, options?: { belowId?: number }): Promise<SystemWindow | null>`
+#### `windows.atPoint(point: Point, options?: { belowId?: number }): Promise<SystemWindow | null>`
 
-Return the topmost window at the given screen coordinate, optionally excluding
-windows at or above `belowId` in z-order.
+Return the first on-screen window containing the screen DIP point. `belowId`
+excludes that window and everything above it.
 
----
+## `secureChannel`
 
-## secureChannel
+Launch one path-verified worker and decode its stdout as ordered binary frames.
+This is process isolation and restricted IPC, not a hostile-code sandbox.
 
-Spawn one dedicated helper process and stream results from stdout over a private
-inherited pipe. The executable is path-verified before it runs. This is process
-isolation, not a sandbox for hostile code.
+Each frame is:
 
-Each stdout message is a 4-byte little-endian unsigned payload length followed
-by that many bytes. Frames are limited to 16 MiB, and only one worker may be
-active at a time.
+```text
+uint32 little-endian payload length | non-empty payload bytes
+```
 
-### Methods
+Payload length must be between 1 byte and 16 MiB. Invalid or truncated framing
+terminates the channel and reports exit code `-1`.
 
 #### `secureChannel.spawn(executablePath: string, arguments?: string[]): Promise<number | null>`
 
-Launch an isolated worker process. Resolves with the child PID, or `null` on
-failure. Arguments are passed directly to the executable without a shell.
+Start a worker without a shell. The absolute executable path is canonicalized
+and verified while the process is suspended. Returns its PID, or `null` if the
+path is invalid, startup fails, or another worker is active.
 
-```js
-const pid = await secureChannel.spawn(process.execPath, [
-  '/absolute/path/to/worker.mjs',
-])
+```ts
+const pid = await secureChannel.spawn(process.execPath, [workerPath])
 ```
+
+The worker's stdin and stderr point to the null device. stdout is reserved for
+framed messages. Child processes are terminated with the worker when the
+channel closes.
 
 #### `secureChannel.verify(pid: number, executablePath: string): Promise<boolean>`
 
-Verify that the given PID is running the expected executable path. `spawn()`
-performs this check internally before resuming the child.
+Compare a running process's canonical executable path with the expected path.
+`spawn()` performs this verification before resuming its child.
 
 #### `secureChannel.terminate(): boolean`
 
-Terminate the active worker and close its pipe. Returns `false` if no channel
-has been created. A later `spawn()` call creates a fresh channel.
-
-#### `secureChannel.wasTerminatedByPrivacy(): boolean`
-
-Deprecated. Always returns `false`: a generic process exit cannot be reliably
-attributed to macOS TCC, and Windows has no equivalent termination reason.
+Terminate the active worker and its process group/job. Returns `false` when no
+worker is active, including after a natural exit.
 
 ### Events
 
-| Event | Listener signature | Fires when |
+| Event | Listener | Meaning |
 |---|---|---|
-| `data` | `(payload: Buffer) => void` | A data frame arrives from the worker. |
-| `exit` | `(code: number) => void` | Worker process exits. |
+| `data` | `(payload: Buffer) => void` | One complete frame. |
+| `exit` | `(code: number) => void` | Worker exit after all decoded data events have been delivered. |
 
-```js
-secureChannel.on('data', (frame) => {
-  // push into an overlay, process, etc.
-})
-```
+On macOS, signal exits use `128 + signal`. Windows returns the process exit
+code converted to a signed 32-bit number. Channel/framing failures use `-1`.
 
----
-
-## apps
-
-Native application icon extraction.
-
-### Methods
+## `apps`
 
 #### `apps.icon(appPath: string, options?: { size?: 'small' | 'medium' }): Promise<string | null>`
 
-Return the application's icon as a `data:image/png;base64,...` URL.
-`small` produces a 16×16 image and `medium` produces 32×32. Missing paths
-resolve to `null`.
+Return an exact-size PNG data URL, or `null` when no application icon can be
+read. `small` is 16×16 and `medium` is 32×32.
 
-- **macOS**: pass a `.app` bundle path (e.g. `/Applications/Safari.app`).
-- **Windows**: pass an `.exe` path (e.g. `C:\Program Files\...\chrome.exe`);
-  the icon resource is extracted via `SHGetFileInfo`.
+- macOS: absolute `.app` bundle or executable path.
+- Windows: absolute executable or file path understood by the Shell.
 
-```js
+```ts
 const icon = await apps.icon('/Applications/Safari.app', { size: 'medium' })
-// 'data:image/png;base64,iVBORw0...'
 ```
 
----
-
-## drag
-
-Native file drag-out from an Electron window into Finder / Explorer / any app.
+## `drag`
 
 ### Types
 
 ```ts
 interface DragConfig {
-  /** absolute file paths to drag */
   files: string[]
-  /** native window handle (BrowserWindow.getNativeWindowHandle()) */
   windowHandle: Buffer
-  /** drag origin in top-left window-local coordinates */
-  position: { x: number; y: number }
+  position: Point
+}
+
+interface DragResult extends Point {
+  dropped: boolean
 }
 ```
 
-### Methods
-
 #### `drag.start(config: DragConfig): Promise<void>`
 
-Begin a copy-only native OS drag session carrying existing files. The promise
-resolves when the drag session ends (drop or cancel).
+Begin one copy-only native file drag. Every path must be absolute and exist.
+`windowHandle` comes from the source BrowserWindow. `position` is a DIP point
+inside that window's content area.
 
-```js
-await drag.start({
-  files: ['/Users/me/report.pdf'],
-  windowHandle: win.getNativeWindowHandle(),
-  position: { x: 100, y: 200 },
+Call this method synchronously from a primary `pointerdown`/mouse-down handler;
+the OS drag loop expects the button to remain pressed when it begins. The
+promise resolves on either drop or cancel and rejects if validation or native
+startup fails. A second concurrent drag rejects.
+
+```ts
+element.addEventListener('pointerdown', async (event) => {
+  if (event.button !== 0 || !event.isPrimary) return
+  await drag.start({
+    files: ['/absolute/path/report.pdf'],
+    windowHandle: win.getNativeWindowHandle(),
+    position: { x: event.clientX, y: event.clientY },
+  })
 })
 ```
 
 ### Events
 
-| Event | Listener signature | Fires when |
+| Event | Listener | Meaning |
 |---|---|---|
-| `ended` | `(info: { dropped: boolean; x: number; y: number }) => void` | Drag session ends; coordinates are top-left screen coordinates. |
+| `ended` | `(result: DragResult) => void` | Drop/cancel result and final top-left-origin screen DIP point. |

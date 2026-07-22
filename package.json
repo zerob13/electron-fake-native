@@ -1,6 +1,6 @@
 {
   "name": "@zerob13/nativekit",
-  "version": "0.0.0",
+  "version": "0.4.0",
   "description": "Cross-platform native capabilities for Electron: overlays, window awareness, isolated IPC, app icons, and file drag-out.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -18,8 +18,8 @@
     "build": "pnpm build:js && pnpm build:native",
     "build:js": "vite build && tsc -p tsconfig.build.json",
     "build:native": "cmake-js build",
-    "build:mac": "cmake-js build --arch=arm64 && cmake-js build --arch=x64",
-    "build:win": "cmake-js build --arch=x64",
+    "build:mac": "cmake-js build --arch=arm64 --out=build/darwin-arm64 && cmake-js build --arch=x64 --out=build/darwin-x64",
+    "build:win": "cmake-js build --arch=x64 --out=build/win32-x64",
     "prebuilds": "prebuildify --napi --strip",
     "test": "vitest run",
     "check": "pnpm build:js && tsc --noEmit && vitest run",
@@ -38,6 +38,7 @@
     "binding.gyp",
     "CMakeLists.txt",
     "src/",
+    "docs/",
     "README.md",
     "LICENSE"
   ],
@@ -50,7 +51,7 @@
     "x64"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "packageManager": "pnpm@10.33.3",
   "repository": {
@@ -69,6 +70,12 @@
     "cross-platform"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "electron": ">=28"
+  },
   "dependencies": {
     "node-addon-api": "^8.9.0",
     "node-gyp-build": "^4.8.4"

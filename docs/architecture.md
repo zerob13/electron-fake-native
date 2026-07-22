@@ -1,273 +1,219 @@
 # Architecture
 
-## 1. Design principles
+## 1. Scope and constraints
 
-1. **One binding layer, two platform tails.** A single C++ N-API entry point
-   compiles platform-specific source files per OS. No scripting-language
-   boundary beyond JS↔C++.
-2. **Feature modules, not a god-object.** Each capability (`overlay`,
-   `windows`, `apps`, `drag`, `secureChannel`) is an independent sub-module with
-   its own cross-platform interface and platform implementations.
-3. **Idiomatic JS API.** Namespaced exports, camelCase, promises where async,
-   EventEmitters for callbacks. No leak of platform/API jargon into JS.
-4. **Main-process only.** The addon touches OS windowing — it must run in the
-   Electron main process. The JS wrapper enforces this and throws otherwise.
-5. **Prebuilt binaries.** Consumers never compile. `prebuildify` ships per-arch
-   `.node` artifacts; `node-gyp-build` resolves them at runtime.
+`nativekit` is a main-process-only Electron library for macOS and Windows. It
+combines a small TypeScript API with a Node-API v8 addon. The public API is the
+same on both operating systems; platform differences that cannot be removed are
+called out explicitly.
 
----
+The project follows five constraints:
 
-## 2. Technology choices
+1. One Node-API binding with two native platform tails.
+2. C++17 for shared and Windows code; Objective-C++ for AppKit code.
+3. No JavaScript call from a native worker thread. Every callback crosses one
+   `Napi::ThreadSafeFunction`.
+4. Native handles are owned by module managers and released by explicit stop
+   operations or the environment cleanup hook.
+5. Published packages contain Node-API prebuilds, while source builds remain a
+   supported fallback.
 
-### Why C++ (node-addon-api), not Rust (napi-rs)
+Animation is deliberately outside the current API. Overlay moves are immediate
+until a complete cross-platform physics system exists.
 
-The headline feature — the **overlay system** — is fundamentally GUI-native:
-on macOS it requires NSWindow subclasses, AppKit delegates, and DisplayLink; on
-Windows it requires layered HWNDs and DWM. C++ reaches both:
+## 2. Package and runtime layers
 
-- **macOS**: `.mm` (Objective-C++) files call AppKit / CoreGraphics directly.
-- **Windows**: `.cpp` files call Win32 / Shell / OLE directly via `windows.h`.
-
-Rust would require hand-written FFI bridges for *every* ObjC method call and
-every Win32 struct — workable for a few enum calls, painful for GUI object
-lifecycles, retain cycles, and delegate callbacks. For a GUI-heavy cross-native
-addon, C++ remains the pragmatic, honest choice.
-
-### Build system
-
-- **CMake** + **cmake-js** (primary) — cross-platform, integrates with
-  Electron's headers, supports Objective-C++ and Swift sources on macOS.
-- `binding.gyp` / `node-gyp` as a fallback for environments that prefer it.
-- **prebuildify** for distribution; consumers resolve via `node-gyp-build`.
-
----
-
-## 3. Layered architecture
-
-```
-┌───────────────────────────────────────────────────────┐
-│  Electron Main Process (JS / TypeScript)              │
-│                                                       │
-│  ┌─────────┐ ┌────────┐ ┌──────────────┐ ┌────────┐  │
-│  │ overlay │ │windows │ │secureChannel │ │ apps   │  │
-│  └────┬────┘ └───┬────┘ └──────┬───────┘ └───┬────┘  │
-│       └───────────┴─────────────┴─────────────┘       │
-│                     js wrapper (index.ts)             │
-├───────────────────────────────────────────────────────┤
-│  N-API Binding Layer (C++ — node-addon-api)            │
-│  binding.cpp  +  per-module ObjectWrap / functions     │
-├──────────────────────────┬────────────────────────────┤
-│        macOS tail        │        Windows tail         │
-│  ┌────────────────────┐  │  ┌────────────────────────┐ │
-│  │ AppKit  (ObjC++)   │  │  │ Win32 (C++)            │ │
-│  │  - NSWindow lvl    │  │  │  - layered HWND        │ │
-│  │  - CGWindowList    │  │  │  - EnumWindows         │ │
-│  │  - NSWorkspace     │  │  │  - GetForegroundWindow │ │
-│  │  - NSDraggingSrc   │  │  │  - SHGetFileInfo       │ │
-│  │  - NSXPCConnection │  │  │  - IDropSource/IDataObj│ │
-│  └────────────────────┘  │  │  - named pipe + restr. │ │
-└──────────────────────────┴──┴────────────────────────┘┘
+```text
+Electron main process
+        │
+        ▼
+dist/index.js / dist/index.cjs        Vite library output + declarations
+        │
+        ▼
+node-gyp-build                        selects local build or N-API prebuild
+        │
+        ▼
+nativekit.node                        node-addon-api, N-API v8
+        │
+        ├── shared managers           validation, state, event dispatch
+        ├── macOS tail                AppKit / CoreGraphics / POSIX
+        └── Windows tail              Win32 / WIC / Shell / OLE
 ```
 
----
+The TypeScript wrapper performs main-process checks, input validation, Promise
+normalization, and Windows physical-pixel/DIP conversion. Native methods remain
+synchronous internally; methods that may later move off-thread already expose
+Promises at the JavaScript boundary.
 
-## 4. Repository layout
+Vite only bundles the JavaScript library. CMake remains the primary native build
+system because Vite does not compile Node-API C++, Objective-C++, or Win32 code.
+`binding.gyp` is kept as the source-build and `prebuildify` fallback.
 
-```
-nativekit/
-├── package.json
-├── README.md
-├── docs/
-│   ├── architecture.md          ← this file
-│   ├── api-reference.md
-│   └── roadmap.md
-├── src/
-│   ├── binding.cpp              # N-API module registration entry
-│   ├── common/
-│   │   ├── types.h              # shared C++ structs (Rect, Window, etc.)
-│   │   ├── json.h               # C++ ↔ JSON helpers for N-API
-│   │   └── async.h              # ThreadSafeFunction wrappers
-│   ├── overlay/                 # floating panel system
-│   │   ├── overlay_manager.h    # platform-neutral interface
-│   │   ├── mac/
-│   │   │   ├── overlay_window.mm    # NSWindow subclass
-│   │   │   ├── overlay_stack.mm     # stack / cascade layout
-│   │   │   └── overlay_controls.mm  # hide / relocate controls
-│   │   └── win/
-│   │       ├── overlay_window.cpp   # layered HWND
-│   │       └── overlay_stack.cpp
-│   ├── windows/                 # system window query
-│   │   ├── window_query.h
-│   │   ├── mac/window_query.mm      # CGWindowListCopyWindowInfo
-│   │   └── win/window_query.cpp     # EnumWindows + GetWindowRect
-│   ├── apps/                    # app icon extraction
-│   │   ├── icon.h
-│   │   ├── mac/icon.mm              # NSWorkspace.shared.icon
-│   │   └── win/icon.cpp             # SHGetFileInfo / ExtractIconEx
-│   ├── drag/                    # native file drag-out
-│   │   ├── drag_source.h
-│   │   ├── mac/drag_source.mm       # NSDraggingSource
-│   │   └── win/drag_source.cpp      # OLE IDropSource + IDataObject
-│   └── ipc/                     # secure isolated channel
-│       ├── secure_channel.h
-│       ├── mac/xpc_channel.mm       # NSXPCConnection
-│       └── win/pipe_channel.cpp     # named pipe + restricted child proc
-├── js/
-│   └── index.ts                 # TS wrapper: platform gating, validation
-├── CMakeLists.txt               # primary build
-├── binding.gyp                  # fallback build
-└── prebuilds/
-    ├── darwin-arm64/nativekit.node
-    ├── darwin-x64/nativekit.node
-    └── win32-x64/nativekit.node
+## 3. Repository layout
+
+```text
+src/
+  binding.cpp                 Node-API registration and cleanup hook
+  common/
+    event_callback.*          ordered ThreadSafeFunction adapter
+    napi_helpers.h            JS conversion and error helpers
+    types.h                   shared Point, Rect, and window records
+    mac/image_utils.*         AppKit image encode/decode
+    win/image_utils.*         WIC and Shell icon encode/decode
+  overlay/
+    overlay_manager.*         host/session/presentation state
+    mac/overlay_window.mm     NSPanel renderer and controls
+    win/overlay_window.cpp    layered HWND renderer and message pump
+  windows/
+    window_query.*            Node-API module boundary
+    mac/window_query.mm       CGWindowList and NSWorkspace
+    win/window_query.cpp      EnumWindows, DWM, foreground window
+  ipc/
+    frame_decoder.h           4-byte little-endian frame decoder
+    secure_channel.*          module manager and Node-API boundary
+    mac/secure_channel.mm     posix_spawn and inherited pipe
+    win/secure_channel.cpp    restricted process, job, inherited pipe
+  apps/                       exact-size application icon extraction
+  drag/                       native file drag source
+js/index.ts                   public TypeScript API
+examples/electron/            context-isolated capability demo
+tests/                        package and native integration tests
 ```
 
----
+The root and `examples/electron` form a pnpm workspace. A larger monorepo tool is
+not needed: the demo consumes the library through `workspace:*`, and the root
+build remains the only publishable package.
 
-## 5. Overlay system design (headline feature)
+## 4. Module design
 
-The overlay system shows always-on-top panels that persist across Spaces /
-macOS Spaces and stack along screen edges. On Windows, public APIs only allow
-a topmost panel on its current virtual desktop. It is the largest sub-module.
+### 4.1 `overlay`
 
-### 5.1 Layout
+The shared manager owns hosts, presentations, session suppression, active
+session ordering, global visibility, and maximum image size. It sends immutable
+snapshots to the platform renderer.
 
-```
-┌──────────────────────────────────────────────────────┐
-│  Desktop (all Spaces / virtual desktops)             │
-│                                                      │
-│                                       ┌──────────┐   │
-│                                       │ Overlay 1│   │
-│                          anchor →→    │ (top-    │   │
-│                                       │  right)  │   │
-│                                       └──────────┘   │
-│   ┌──────────┐                                      │
-│   │ Overlay 2│  ← cascaded under Overlay 1          │
-│   └──────────┘                                      │
-│                                                      │
-│   ┌─────────────────────────────────┐               │
-│   │   Electron Main Window          │               │
-│   └─────────────────────────────────┘               │
-└──────────────────────────────────────────────────────┘
+`pushImage()` is transactional. If native image decoding or rendering fails, the
+previous presentation state is restored and re-rendered, so a rejected call does
+not make `hasAny()` lie or replace a valid frame with an invalid one.
+
+macOS uses non-activating `NSPanel` instances with transparent content, floating
+window level, and these collection behaviors:
+
+```text
+canJoinAllSpaces | stationary | ignoresCycle | fullScreenAuxiliary
 ```
 
-### 5.2 Concepts
+Windows uses one STA message-pump thread and per-presentation layered windows:
 
-- **Host** — an Electron `BrowserWindow` registered as an overlay origin.
-  Provides the native window handle, content bounds, title, and anchor.
-- **Presentation** — a single visible panel, identified by `presentationId`.
-  Lifecycle: `attached → visible → completed → removed`.
-- **Session** — a logical grouping (e.g. one assistant conversation). Overlays
-  can be shown/suppressed per session; completing a session clears all its
-  presentations.
-- **Stack** — multiple presentations arranged in a stack (cascade or expand),
-  anchored to a screen edge.
-- **Anchor** — screen-edge attachment point (`leading`/`trailing`/`top`/
-  `bottom`) with an offset.
-
-### 5.3 Window configuration
-
-**macOS**
-```
-level:            NSFloatingWindowLevel      # above normal windows
-collectionBehavior: canJoinAllSpaces         # visible on every Space
-                  | stationary               # doesn't participate in Exposé
-                  | ignoresCycle             # not in Cmd-` cycle
-hasShadow:        false                      # custom shadow if needed
-backgroundColor:  NSColor.clearColor         # transparent
-ignoresMouseEvents: false                    # interactive
+```text
+WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+UpdateLayeredWindow(PBGRA) + HWND_TOPMOST
 ```
 
-**Windows**
-```
-extended style: WS_EX_LAYERED                # per-pixel alpha
-              | WS_EX_NOACTIVATE             # never steals focus
-              | WS_EX_TOOLWINDOW             # no taskbar entry
-topmost:        SetWindowPos(HWND_TOPMOST)
-rendering:      UpdateLayeredWindow (premultiplied BGRA)
-```
+Both tails preserve image aspect ratio, render an optional application-icon
+badge, provide hide/relocate tooltips, scale controls for DPI, skip suppressed
+items in stack layout, and hide overflow items rather than overlap them. macOS
+panels can join all Spaces; Windows topmost windows remain on their current
+virtual desktop because Win32 has no supported equivalent.
 
-### 5.4 Frame injection
+### 4.2 `windows`
 
-Frames (screenshots / images) are pushed as data URLs directly through N-API —
-no separate producer process needed for the self-contained path:
+Native enumeration returns front-to-back snapshots. Public `level` is the
+z-order position: lower values are nearer the front. `relativeTo` excludes the
+reference window and every window above it. Hidden windows remain in `list()`;
+`atPoint()` only considers on-screen windows.
 
-```
-JS  ──pushImage(dataURL)──▶  N-API  ──▶  OverlayWindow render
-```
+CoreGraphics and Win32 use different coordinate spaces. The Electron-facing API
+normalizes screen points and rectangles to device-independent pixels (DIP) on
+Windows through Electron's `screen` module. macOS points already match Electron
+DIP semantics.
 
-For the **worker process** path (see §6), framed bytes stream from the helper;
-the Electron main process decides whether to forward them to an overlay.
+### 4.3 `secureChannel`
 
----
+The channel launches one verified helper process and reads its stdout through a
+private inherited pipe:
 
-## 6. Verified worker channel design
-
-Spawns one dedicated helper and streams length-prefixed stdout frames over a
-private inherited pipe. The executable path is verified before the child
-resumes. This deliberately does not claim to sandbox hostile code.
-
-```
-┌──────────────┐                         ┌──────────────────┐
-│ Electron main│   private framed pipe     │  helper process  │
-│  (host)      │◀─────────────────────────│  (worker)        │
-│              │  4-byte LE length + data │  restricted on  │
-│              │                           │  Windows        │
-└──────┬───────┘                         └──────────────────┘
-       │
-       │  spawn(executablePath, arguments?) → pid
-       │  verify(pid, executablePath) → bool
-       │  terminate() → bool
-       ▼
-   overlay.pushImage(...)  # stream worker frames into an overlay
+```text
+4-byte unsigned little-endian length | 1..16 MiB payload
 ```
 
-### Trust model
-- **macOS**: `posix_spawn` starts suspended; `proc_pidpath` must match the
-  canonical requested executable before it resumes.
-- **Windows**: `CreateProcessAsUser` uses a restricted token and job object;
-  `QueryFullProcessImageName` must match before the primary thread resumes.
-- The pipe write handle is inherited only by that child. Restricted tokens and
-  separate processes reduce blast radius but are not a hostile-code sandbox.
+There is no shell. stdin and stderr are redirected to the null device. The child
+is created suspended, its canonical executable path is verified, and only then
+is it resumed.
 
----
+- macOS: `posix_spawn`, a dedicated process group, `proc_pidpath`, and group
+  termination.
+- Windows: `CreateProcessAsUser` with a restricted token, an explicit inherited
+  handle list, path verification, and a kill-on-close Job object.
 
-## 7. Cross-platform capability mapping
+The reader is drained before the exit event is queued. Data and exit use one
+ThreadSafeFunction, preserving `data...data...exit` order in JavaScript. An
+invalid length, oversized frame, read error, or truncated final frame terminates
+the channel and reports exit code `-1`.
 
+This reduces accidental privilege and IPC exposure. It is not a sandbox for
+hostile executables.
+
+### 4.4 `apps`
+
+`apps.icon()` resolves the operating-system icon and rasterizes it to exactly
+16×16 or 32×32 PNG pixels. macOS uses `NSWorkspace`; Windows uses Shell icon
+lookup plus WIC scaling and PNG encoding.
+
+### 4.5 `drag`
+
+The drag manager allows one active copy-only file drag. macOS uses
+`NSDraggingSession`; Windows uses an STA OLE thread with `CF_HDROP`,
+`IDataObject`, `IDropSource`, and `IDragSourceHelper`.
+
+The call must originate while the primary pointer button is down. The input is a
+window-client DIP point and the `ended` event reports a screen DIP point on both
+platforms. Windows converts to physical pixels only inside the native tail.
+
+## 5. Threading and cleanup
+
+```text
+Electron main/UI thread
+  ├── shared managers and Node-API calls
+  ├── AppKit overlay and macOS drag
+  └── ThreadSafeFunction delivery
+
+Native worker threads
+  ├── Windows overlay message pump (STA)
+  ├── secure-channel reader + process waiter
+  └── Windows OLE drag loop (STA)
 ```
-┌──────────────────────┬────────────────────────┬─────────────────────────────┐
-│  Capability          │  macOS                 │  Windows                   │
-├──────────────────────┼────────────────────────┼─────────────────────────────┤
-│  Floating overlay    │  NSPanel (all Spaces) │  Layered HWND (current VD) │
-│  Window enumeration   │  CGWindowListCopyInfo  │  EnumWindows + GetWindowRect│
-│  Frontmost window     │  NSWorkspace.frontmost │  GetForegroundWindow        │
-│  App icon             │  NSWorkspace.icon      │  SHGetFileInfo / ExtractIcon│
-│  File drag-out        │  NSDraggingSource      │  IDropSource + IDataObject  │
-│  Worker channel       │  inherited stdout pipe │  inherited stdout pipe    │
-│  Worker process       │  posix_spawn + path    │  restricted token + job   │
-└──────────────────────┴────────────────────────┴─────────────────────────────┘
+
+The Node environment cleanup hook calls independent `noexcept` cleanup
+functions. Each module absorbs shutdown-only failures so one native subsystem
+cannot prevent the others from releasing resources or unwind an exception
+through the C cleanup callback.
+
+## 6. Build and distribution
+
+Local development:
+
+```bash
+pnpm install
+pnpm build:js       # Vite ESM/CJS + TypeScript declarations
+pnpm build:native   # CMake + cmake-js
+pnpm check          # package build, typecheck, integration tests
+pnpm demo:smoke     # Electron end-to-end capability demo
 ```
 
----
+Release CI builds and tests these targets independently:
 
-## 8. Memory & threading
+```text
+prebuilds/darwin-arm64/nativekit.napi.node
+prebuilds/darwin-x64/nativekit.napi.node
+prebuilds/win32-x64/nativekit.napi.node
+```
 
-- **N-API ObjectWrap** owns native object lifetimes (overlay window, drag
-  session, channel). Destructor releases native handles.
-- **ThreadSafeFunction** carries callbacks from native threads (DisplayLink,
-  worker process events, window-change notifications) back to the JS event loop
-  safely. Never call JS from a non-main thread directly.
-- On macOS, overlay window callbacks fire on the main thread already (UI
-  thread), so TSF is used only for worker-process notifications.
-- On Windows, the overlay message pump runs on a dedicated thread; all JS
-  callbacks cross via ThreadSafeFunction.
+The publish job assembles all three artifacts, builds the Vite library, verifies
+the npm tarball, publishes that tarball, and attaches the same archive to the
+GitHub release. `node-gyp-build` prefers the matching Node-API prebuild and falls
+back to `binding.gyp` when a consumer explicitly builds from source.
 
----
-
-## 9. Distribution
-
-- Each release builds 3 targets: `darwin-arm64`, `darwin-x64`, `win32-x64`.
-- `prebuildify` embeds prebuilt `.node` under `prebuilds/<platform>-<arch>/`.
-- Runtime resolution via `node-gyp-build`, with `resourcesPath` /
-  `app.getAppPath()` fallback search for Electron asar-unpacked binaries.
-- TypeScript types ship in the package (`js/index.d.ts`).
+The renderer demo never imports the addon. A narrow context-isolated preload
+exposes domain operations over validated `ipcMain.handle` channels; mutable
+native state stays in the Electron main process.
