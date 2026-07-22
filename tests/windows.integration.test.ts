@@ -60,3 +60,20 @@ describe('JavaScript boundary validation', () => {
     expect(() => apps.icon('Safari.app')).toThrow('absolute path')
   })
 })
+
+describe('overlay lifecycle integration', () => {
+  it('starts, reports empty state, emits size changes, and stops idempotently', async () => {
+    expect(overlay.start()).toBe(true)
+    expect(overlay.hasAny()).toBe(false)
+    expect(overlay.hasActive()).toBe(false)
+
+    const changed = new Promise<number>((resolvePromise) => {
+      overlay.once('maxSizeChanged', resolvePromise)
+    })
+    expect(overlay.setMaxSize(360)).toBe(true)
+    await expect(changed).resolves.toBe(360)
+
+    expect(overlay.stop()).toBe(true)
+    expect(overlay.stop()).toBe(true)
+  })
+})

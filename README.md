@@ -7,7 +7,7 @@ operating-system-level interaction that the Chromium/Electron layer can't
 provide or does poorly:
 
 - **Floating overlay panels** — always-on-top windows anchored to screen edges,
-  stacked/cascaded, living across all Spaces / virtual desktops.
+  stacked across all macOS Spaces and the current Windows virtual desktop.
 - **Native window awareness** — enumerate, query, and hit-test system windows to
   build context-aware UI.
 - **Secure isolated IPC** — run sensitive work in a sandboxed child process and
@@ -27,7 +27,7 @@ common desktop interactions fall through the cracks:
 
 | Problem | Electron alone | nativekit |
 |---|---|---|
-| Floating panel above *all* windows & Spaces | `BrowserWindow` is app-scoped, hides on Space switch | True OS-level overlay (NSWindow / layered HWND) |
+| Floating panel outside the app window | `BrowserWindow` remains app-owned | OS-level overlay (NSPanel / layered HWND) |
 | Knowing what window/app the user is in | Not exposed | Full system window enumeration |
 | Sensitive automation in isolation | Runs in the renderer/main process | Sandboxed child process + verified IPC |
 | Real app icons | Bundled PNGs / guesswork | Native icon extraction |
@@ -119,7 +119,7 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 
 | Capability | macOS | Windows |
 |---|---|---|
-| Floating overlay | NSWindow (floating level) | Layered HWND (`WS_EX_LAYERED`) |
+| Floating overlay | NSPanel on all Spaces | Layered HWND on the current virtual desktop |
 | Window enumeration | CGWindowList | `EnumWindows` |
 | Frontmost window | NSWorkspace | `GetForegroundWindow` |
 | App icon | NSWorkspace.icon | `SHGetFileInfo` / icon resources |

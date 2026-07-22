@@ -4,6 +4,8 @@
       "target_name": "nativekit",
       "sources": [
         "src/binding.cpp",
+        "src/common/event_callback.cc",
+        "src/overlay/overlay_manager.cc",
         "src/windows/window_query.cc"
       ],
       "include_dirs": [
@@ -19,12 +21,14 @@
         ["OS=='mac'", {
           "sources": [
             "src/common/mac/image_utils.mm",
+            "src/overlay/mac/overlay_window.mm",
             "src/windows/mac/window_query.mm"
           ],
           "link_settings": {
             "libraries": [
               "-framework AppKit",
-              "-framework CoreGraphics"
+              "-framework CoreGraphics",
+              "-framework QuartzCore"
             ]
           },
           "xcode_settings": {
@@ -37,12 +41,14 @@
         ["OS=='win'", {
           "sources": [
             "src/common/win/image_utils.cpp",
+            "src/overlay/win/overlay_window.cpp",
             "src/windows/win/window_query.cpp"
           ],
           "defines": [
             "NOMINMAX",
             "UNICODE",
             "_UNICODE",
+            "_WIN32_WINNT=0x0A00",
             "WIN32_LEAN_AND_MEAN"
           ],
           "libraries": [

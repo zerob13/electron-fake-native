@@ -127,8 +127,8 @@ nativekit/
 ## 5. Overlay system design (headline feature)
 
 The overlay system shows always-on-top panels that persist across Spaces /
-virtual desktops and stack/cascade along screen edges. It is the largest
-sub-module.
+macOS Spaces and stack along screen edges. On Windows, public APIs only allow
+a topmost panel on its current virtual desktop. It is the largest sub-module.
 
 ### 5.1 Layout
 
@@ -182,9 +182,9 @@ ignoresMouseEvents: false                    # interactive
 ```
 extended style: WS_EX_LAYERED                # per-pixel alpha
               | WS_EX_NOACTIVATE             # never steals focus
-              | WS_EX_TOPMOST                # above normal windows
               | WS_EX_TOOLWINDOW             # no taskbar entry
-                + DwmExtendFrameIntoClientArea for translucent edges
+topmost:        SetWindowPos(HWND_TOPMOST)
+rendering:      UpdateLayeredWindow (premultiplied BGRA)
 ```
 
 ### 5.4 Frame injection
@@ -236,7 +236,7 @@ untrusted code execution) and streams results back over a verified channel.
 ┌──────────────────────┬────────────────────────┬─────────────────────────────┐
 │  Capability          │  macOS                 │  Windows                   │
 ├──────────────────────┼────────────────────────┼─────────────────────────────┤
-│  Floating overlay    │  NSWindow (float level)│  Layered HWND (TOPMOST)    │
+│  Floating overlay    │  NSPanel (all Spaces) │  Layered HWND (current VD) │
 │  Window enumeration   │  CGWindowListCopyInfo  │  EnumWindows + GetWindowRect│
 │  Frontmost window     │  NSWorkspace.frontmost │  GetForegroundWindow        │
 │  App icon             │  NSWorkspace.icon      │  SHGetFileInfo / ExtractIcon│

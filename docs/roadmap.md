@@ -30,7 +30,7 @@ Development is phased by impact and risk. Each phase is independently shippable.
 - [ ] Cross-platform `overlay_manager.h` interface (Host, Presentation, Session,
       Stack, Anchor)
 - [ ] macOS:
-  - [ ] `NSWindow` subclass — floating level, all-Spaces, stationary, clear bg
+  - [ ] `NSPanel` subclass — floating level, all-Spaces, stationary, clear bg
   - [ ] Stack layout engine (cascade + expand) with edge anchoring
   - [ ] Frame rendering from `data:image/...;base64` payloads (N-API path)
   - [ ] Control panel — hide / relocate buttons, SF-Symbol icons, tooltips,
@@ -40,7 +40,7 @@ Development is phased by impact and risk. Each phase is independently shippable.
   - [ ] Events: `maxSizeChanged`, `activate`, `visibilityRequest`
 - [ ] Windows:
   - [ ] Layered `HWND` (`WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOPMOST`)
-  - [ ] `DwmExtendFrameIntoClientArea` for translucent edges
+  - [ ] `UpdateLayeredWindow` with premultiplied-alpha WIC output
   - [ ] Message-pump thread + `ThreadSafeFunction` for JS callbacks
   - [ ] Stack layout + anchoring (parity with macOS)
   - [ ] Frame rendering (GDI / Direct2D from base64)

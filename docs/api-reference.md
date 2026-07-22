@@ -24,8 +24,10 @@ All async methods return Promises. Event subscriptions use the standard
 
 ## overlay
 
-Floating, always-on-top panel system. Panels persist across Spaces (macOS) /
-virtual desktops (Windows) and stack along screen edges.
+Floating panel system. Panels persist across macOS Spaces and stack along
+screen edges. Windows panels are topmost on their current virtual desktop;
+Windows exposes no supported API for pinning a third-party window to every
+virtual desktop.
 
 ### Types
 
@@ -53,6 +55,8 @@ interface HostConfig {
 }
 
 interface ImageFrame {
+  /** target host; optional only while exactly one host is attached */
+  hostId?: string
   /** unique presentation id */
   presentationId: string
   /** logical grouping; completing a session clears its presentations */
@@ -118,6 +122,7 @@ same `presentationId` update the same panel.
 
 ```js
 overlay.pushImage({
+  hostId: 'main',
   presentationId: 'snap-1',
   sessionId: 'task-42',
   imageData: 'data:image/png;base64,iVBORw0KGgo...',

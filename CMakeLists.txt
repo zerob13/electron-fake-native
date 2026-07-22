@@ -7,6 +7,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(NATIVEKIT_SOURCES
   src/binding.cpp
+  src/common/event_callback.cc
+  src/overlay/overlay_manager.cc
   src/windows/window_query.cc
 )
 
@@ -18,16 +20,19 @@ if(APPLE)
 
   list(APPEND NATIVEKIT_SOURCES
     src/common/mac/image_utils.mm
+    src/overlay/mac/overlay_window.mm
     src/windows/mac/window_query.mm
   )
 
   find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
   find_library(CORE_GRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+  find_library(QUARTZ_CORE_FRAMEWORK QuartzCore REQUIRED)
 endif()
 
 if(WIN32)
   list(APPEND NATIVEKIT_SOURCES
     src/common/win/image_utils.cpp
+    src/overlay/win/overlay_window.cpp
     src/windows/win/window_query.cpp
   )
 endif()
@@ -72,6 +77,7 @@ if(APPLE)
   target_link_libraries(nativekit PRIVATE
     ${APPKIT_FRAMEWORK}
     ${CORE_GRAPHICS_FRAMEWORK}
+    ${QUARTZ_CORE_FRAMEWORK}
   )
   target_link_options(nativekit PRIVATE "-undefined" "dynamic_lookup")
 endif()
@@ -85,6 +91,7 @@ if(WIN32)
     NOMINMAX
     UNICODE
     _UNICODE
+    _WIN32_WINNT=0x0A00
     WIN32_LEAN_AND_MEAN
   )
   target_link_libraries(nativekit PRIVATE

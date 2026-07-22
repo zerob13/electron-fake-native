@@ -31,6 +31,8 @@ export interface HostConfig {
 }
 
 export interface ImageFrame {
+  /** Required when more than one host is attached. */
+  hostId?: string
   presentationId: string
   sessionId: string
   imageData: string
@@ -202,11 +204,17 @@ class Overlay extends EventEmitter {
     requireNonEmptyString(frame.presentationId, 'frame.presentationId')
     requireNonEmptyString(frame.sessionId, 'frame.sessionId')
     requireNonEmptyString(frame.imageData, 'frame.imageData')
+    if (frame.imageData.length > 32 * 1024 * 1024) {
+      throw new RangeError('frame.imageData exceeds the 32 MiB limit')
+    }
     if (!/^data:image\/(?:png|jpe?g);base64,/i.test(frame.imageData)) {
       throw new TypeError('frame.imageData must be a PNG or JPEG data URL')
     }
     if (frame.appIconPath !== undefined && frame.appIconPath !== null) {
       requireAbsolutePath(frame.appIconPath, 'frame.appIconPath')
+    }
+    if (frame.hostId !== undefined) {
+      requireNonEmptyString(frame.hostId, 'frame.hostId')
     }
     return native.overlayPushImage(frame)
   }
@@ -435,7 +443,7 @@ function requireAbsolutePath(
 }
 
 function requireBuffer(value: unknown, name: string): asserts value is Buffer {
-  if (!Buffer.isBuffer(value) || value.byteLength === 0) {
+  if (!Buffer.isBuffer(value) || value.byteLength !== 8) {
     throw new TypeError(
       `${name} must be the Buffer returned by getNativeWindowHandle()`,
     )
