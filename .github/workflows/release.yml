@@ -160,13 +160,13 @@ jobs:
             test "$minos" = "12.0"
           fi
           mkdir -p prebuilds/${{ matrix.target }}
-          cp "$node_file" prebuilds/${{ matrix.target }}/nativekit.napi.node
+          cp "$node_file" prebuilds/${{ matrix.target }}/node.napi.node
 
       - name: Upload prebuild
         uses: actions/upload-artifact@v4
         with:
           name: prebuild-${{ matrix.target }}
-          path: prebuilds/${{ matrix.target }}/nativekit.napi.node
+          path: prebuilds/${{ matrix.target }}/node.napi.node
           if-no-files-found: error
           retention-days: 7
 
@@ -234,10 +234,10 @@ jobs:
         shell: bash
         run: |
           for target in darwin-arm64 darwin-x64 win32-x64 linux-x64 linux-arm64; do
-            source="artifacts/prebuild-${target}/nativekit.napi.node"
+            source="artifacts/prebuild-${target}/node.napi.node"
             test -f "$source"
             mkdir -p "prebuilds/${target}"
-            cp "$source" "prebuilds/${target}/nativekit.napi.node"
+            cp "$source" "prebuilds/${target}/node.napi.node"
           done
           pnpm build:js
 
@@ -249,7 +249,7 @@ jobs:
           test -n "$archive"
           contents=$(tar -tf "$archive")
           for target in darwin-arm64 darwin-x64 win32-x64 linux-x64 linux-arm64; do
-            grep -Fqx "package/prebuilds/${target}/nativekit.napi.node" <<< "$contents"
+            grep -Fqx "package/prebuilds/${target}/node.napi.node" <<< "$contents"
           done
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
