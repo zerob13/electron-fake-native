@@ -59,11 +59,12 @@ NSScreen* screen_for_frame(NSRect frame) {
 }
 @end
 
-@interface NativekitOverlayView : NSView
+@interface NativekitOverlayView : NSView <NSWindowDelegate>
 - (instancetype)initWithActivate:(std::function<void()>)activate
                              hide:(std::function<void()>)hide
                          relocate:(std::function<void()>)relocate
                             moved:(std::function<void(NSRect)>)moved;
+- (void)applyFrameFromLayout:(NSRect)frame;
 - (void)setContentImage:(NSImage*)image
                iconPath:(NSString*)iconPath
             hideTooltip:(NSString*)hideTooltip
@@ -79,6 +80,9 @@ NSScreen* screen_for_frame(NSRect frame) {
   std::function<void()> hide_;
   std::function<void()> relocate_;
   std::function<void(NSRect)> moved_;
+  BOOL applying_layout_frame_;
+  BOOL has_pending_layout_origin_;
+  NSPoint pending_layout_origin_;
 }
 
 - (instancetype)initWithActivate:(std::function<void()>)activate
@@ -149,12 +153,34 @@ NSScreen* screen_for_frame(NSRect frame) {
     return;
   }
   NativekitOverlayPanel* panel = (NativekitOverlayPanel*)self.window;
-  const NSPoint previous_origin = panel.frame.origin;
+  // AppKit returns before the Window Server finishes moving the panel.
   [panel performWindowDragWithEvent:event];
-  const NSRect frame = clamped_frame(panel.frame, panel.screen);
-  [panel setFrame:frame display:YES animate:NO];
-  if (!NSEqualPoints(previous_origin, frame.origin) && moved_) {
-    moved_(frame);
+}
+
+- (void)applyFrameFromLayout:(NSRect)frame {
+  pending_layout_origin_ = frame.origin;
+  has_pending_layout_origin_ = YES;
+  applying_layout_frame_ = YES;
+  [self.window setFrame:frame display:YES animate:NO];
+  applying_layout_frame_ = NO;
+}
+
+- (void)windowDidMove:(NSNotification*)notification {
+  NSWindow* window = notification.object;
+  if (window != self.window) return;
+
+  const NSRect frame = window.frame;
+  // Snapshot layout must not be mistaken for user-owned placement.
+  if (applying_layout_frame_ ||
+      (has_pending_layout_origin_ &&
+       NSEqualPoints(pending_layout_origin_, frame.origin))) {
+    has_pending_layout_origin_ = NO;
+    return;
+  }
+  has_pending_layout_origin_ = NO;
+  if (moved_) {
+    NSScreen* screen = window.screen ?: screen_for_frame(frame);
+    moved_(clamped_frame(frame, screen));
   }
 }
 
@@ -349,6 +375,7 @@ class MacOverlayPlatform final : public OverlayPlatform {
                               presentation_id, frame);
                         }];
         panel.contentView = content_view;
+        panel.delegate = content_view;
         panels_[identifier] = panel;
       }
 
@@ -379,11 +406,11 @@ class MacOverlayPlatform final : public OverlayPlatform {
         if (screen == nil) screen = screen_for_host(host->second);
         frame = clamped_frame(frame, screen);
         manual_frame->second = frame;
-        [panel setFrame:frame display:YES animate:NO];
+        [view applyFrameFromLayout:frame];
         visible_ids.insert(presentation.id);
       } else if (eligible && stack_slot_fits) {
         const NSRect frame = frame_for_presentation(host->second, size, cursor);
-        [panel setFrame:frame display:YES animate:NO];
+        [view applyFrameFromLayout:frame];
         visible_ids.insert(presentation.id);
         // Visible panels are ordered after layout so the active session wins.
       } else {
