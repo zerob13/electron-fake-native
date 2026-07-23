@@ -23,18 +23,23 @@ jobs:
         include:
           - target: darwin-arm64
             arch: arm64
+            prebuild_name: node.napi.armv8.node
             runner: macos-15
           - target: darwin-x64
             arch: x64
+            prebuild_name: node.napi.node
             runner: macos-15-intel
           - target: win32-x64
             arch: x64
+            prebuild_name: node.napi.node
             runner: windows-2022
           - target: linux-x64
             arch: x64
+            prebuild_name: node.napi.node
             runner: ubuntu-22.04
           - target: linux-arm64
             arch: arm64
+            prebuild_name: node.napi.armv8.node
             runner: ubuntu-22.04-arm
 
     steps:
@@ -160,13 +165,19 @@ jobs:
             test "$minos" = "12.0"
           fi
           mkdir -p prebuilds/${{ matrix.target }}
-          cp "$node_file" prebuilds/${{ matrix.target }}/node.napi.node
+          cp "$node_file" prebuilds/${{ matrix.target }}/${{ matrix.prebuild_name }}
+
+      - name: Verify prebuild resolution
+        env:
+          EXPECTED_PREBUILD: prebuilds/${{ matrix.target }}/${{ matrix.prebuild_name }}
+          PREBUILDS_ONLY: '1'
+        run: node -e "const path = require('node:path'); const actual = require('node-gyp-build').path('.'); const expected = path.resolve(process.env.EXPECTED_PREBUILD); if (actual !== expected) throw new Error('Expected ' + expected + ', resolved ' + actual)"
 
       - name: Upload prebuild
         uses: actions/upload-artifact@v4
         with:
           name: prebuild-${{ matrix.target }}
-          path: prebuilds/${{ matrix.target }}/node.napi.node
+          path: prebuilds/${{ matrix.target }}/${{ matrix.prebuild_name }}
           if-no-files-found: error
           retention-days: 7
 
@@ -234,10 +245,14 @@ jobs:
         shell: bash
         run: |
           for target in darwin-arm64 darwin-x64 win32-x64 linux-x64 linux-arm64; do
-            source="artifacts/prebuild-${target}/node.napi.node"
+            case "$target" in
+              *-arm64) prebuild_name="node.napi.armv8.node" ;;
+              *) prebuild_name="node.napi.node" ;;
+            esac
+            source="artifacts/prebuild-${target}/${prebuild_name}"
             test -f "$source"
             mkdir -p "prebuilds/${target}"
-            cp "$source" "prebuilds/${target}/node.napi.node"
+            cp "$source" "prebuilds/${target}/${prebuild_name}"
           done
           pnpm build:js
 
@@ -249,7 +264,11 @@ jobs:
           test -n "$archive"
           contents=$(tar -tf "$archive")
           for target in darwin-arm64 darwin-x64 win32-x64 linux-x64 linux-arm64; do
-            grep -Fqx "package/prebuilds/${target}/node.napi.node" <<< "$contents"
+            case "$target" in
+              *-arm64) prebuild_name="node.napi.armv8.node" ;;
+              *) prebuild_name="node.napi.node" ;;
+            esac
+            grep -Fqx "package/prebuilds/${target}/${prebuild_name}" <<< "$contents"
           done
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
 

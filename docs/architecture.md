@@ -193,11 +193,11 @@ pnpm demo:smoke     # Electron end-to-end capability demo
 Release CI builds and tests these published targets independently:
 
 ```text
-prebuilds/darwin-arm64/node.napi.node
+prebuilds/darwin-arm64/node.napi.armv8.node
 prebuilds/darwin-x64/node.napi.node
 prebuilds/win32-x64/node.napi.node
 prebuilds/linux-x64/node.napi.node
-prebuilds/linux-arm64/node.napi.node
+prebuilds/linux-arm64/node.napi.armv8.node
 ```
 
 Linux targets build on native Ubuntu 22.04 x64 and arm64 runners. CI starts
