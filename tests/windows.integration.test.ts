@@ -46,6 +46,26 @@ describe('windows native integration', () => {
 })
 
 describe('JavaScript boundary validation', () => {
+  it('validates overlay control tooltips', () => {
+    expect(() =>
+      overlay.start({
+        controls: [
+          { id: 'close', icon: 'close', tooltip: '' },
+        ],
+      }),
+    ).toThrow(
+      'options.controls[0].tooltip must be a non-empty string',
+    )
+    expect(() =>
+      overlay.start({
+        controls: [
+          { id: 'duplicate', icon: 'close' },
+          { id: 'duplicate', icon: 'panel-right-open' },
+        ],
+      }),
+    ).toThrow('options.controls ids must be unique')
+  })
+
   it('rejects malformed overlay input before crossing N-API', () => {
     expect(() =>
       overlay.pushImage({

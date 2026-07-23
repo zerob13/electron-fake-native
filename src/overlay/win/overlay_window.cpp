@@ -20,6 +20,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -48,8 +49,6 @@ constexpr int kControlSize = 24;
 constexpr int kControlStroke = 2;
 constexpr int kIconMargin = 8;
 constexpr int kIconSize = 28;
-constexpr UINT_PTR kHideTooltipId = 1;
-constexpr UINT_PTR kRelocateTooltipId = 2;
 
 [[noreturn]] void throw_windows_error(const char* operation) {
   throw std::runtime_error(
@@ -114,18 +113,16 @@ class UniqueBitmap {
   HBITMAP bitmap_ = nullptr;
 };
 
-enum class Control { kNone, kHide, kRelocate };
-
-struct ControlRects {
-  RECT hide{};
-  RECT relocate{};
-};
-
 int scaled_pixels(int value, double scale_factor) {
   return std::max(1, static_cast<int>(std::lround(value * scale_factor)));
 }
 
-ControlRects control_rects(int width, int height, double scale_factor) {
+std::vector<RECT> control_rects(
+    int width,
+    int height,
+    double scale_factor,
+    std::size_t count) {
+  if (count == 0) return {};
   const int margin = std::max(
       1,
       std::min({
@@ -136,27 +133,25 @@ ControlRects control_rects(int width, int height, double scale_factor) {
   const int gap = std::max(
       1,
       std::min(scaled_pixels(kControlGap, scale_factor), width / 16));
-  const int available_width = std::max(2, width - margin * 2 - gap);
+  const int gap_width = gap * static_cast<int>(count - 1);
+  const int available_width = std::max(
+      static_cast<int>(count),
+      width - margin * 2 - gap_width);
   const int button = std::max(
       1,
       std::min({
           scaled_pixels(kControlSize, scale_factor),
           height - margin * 2,
-          available_width / 2,
+          available_width / static_cast<int>(count),
       }));
-  ControlRects result;
-  result.hide = {
-      width - margin - button,
-      margin,
-      width - margin,
-      margin + button,
-  };
-  result.relocate = {
-      result.hide.left - gap - button,
-      margin,
-      result.hide.left - gap,
-      margin + button,
-  };
+  const int start =
+      width - margin - static_cast<int>(count) * button - gap_width;
+  std::vector<RECT> result;
+  result.reserve(count);
+  for (std::size_t index = 0; index < count; ++index) {
+    const int left = start + static_cast<int>(index) * (button + gap);
+    result.push_back({left, margin, left + button, margin + button});
+  }
   return result;
 }
 
@@ -205,63 +200,127 @@ void blend_rect(
   }
 }
 
+void blend_line(
+    BYTE* pixels,
+    int width,
+    int height,
+    LONG from_x,
+    LONG from_y,
+    LONG to_x,
+    LONG to_y,
+    LONG stroke) {
+  const LONG steps = std::max(std::abs(to_x - from_x), std::abs(to_y - from_y));
+  if (steps == 0) return;
+  const LONG radius = std::max<LONG>(0, stroke / 2);
+  for (LONG step = 0; step <= steps; ++step) {
+    const LONG x = from_x + (to_x - from_x) * step / steps;
+    const LONG y = from_y + (to_y - from_y) * step / steps;
+    blend_rect(
+        pixels,
+        width,
+        height,
+        {x - radius, y - radius, x - radius + stroke, y - radius + stroke},
+        255,
+        255,
+        255,
+        230);
+  }
+}
+
 void draw_controls(
     BYTE* pixels,
     int width,
     int height,
-    double scale_factor) {
-  const ControlRects rects = control_rects(width, height, scale_factor);
-  blend_rect(pixels, width, height, rects.hide, 24, 24, 24, 178);
-  blend_rect(pixels, width, height, rects.relocate, 24, 24, 24, 178);
-
+    double scale_factor,
+    const std::vector<OverlayControl>& controls) {
+  const auto rects =
+      control_rects(width, height, scale_factor, controls.size());
   const LONG stroke = scaled_pixels(kControlStroke, scale_factor);
-  const LONG hide_center_x = (rects.hide.left + rects.hide.right) / 2;
-  const LONG hide_center_y = (rects.hide.top + rects.hide.bottom) / 2;
-  const LONG hide_half = std::max<LONG>(
-      stroke, (rects.hide.right - rects.hide.left) / 4);
-  blend_rect(
-      pixels,
-      width,
-      height,
-      {hide_center_x - hide_half,
-       hide_center_y,
-       hide_center_x + hide_half + 1,
-       hide_center_y + stroke},
-      255,
-      255,
-      255,
-      230);
+  for (std::size_t index = 0; index < controls.size(); ++index) {
+    const RECT rect = rects[index];
+    blend_rect(pixels, width, height, rect, 24, 24, 24, 178);
+    if (controls[index].icon == OverlayControlIcon::kClose) {
+      const LONG center_x = (rect.left + rect.right) / 2;
+      const LONG center_y = (rect.top + rect.bottom) / 2;
+      const LONG half =
+          std::max<LONG>(stroke, (rect.right - rect.left) / 4);
+      blend_line(
+          pixels,
+          width,
+          height,
+          center_x - half,
+          center_y - half,
+          center_x + half,
+          center_y + half,
+          stroke);
+      blend_line(
+          pixels,
+          width,
+          height,
+          center_x - half,
+          center_y + half,
+          center_x + half,
+          center_y - half,
+          stroke);
+      continue;
+    }
 
-  const LONG move_center_x =
-      (rects.relocate.left + rects.relocate.right) / 2;
-  const LONG move_center_y =
-      (rects.relocate.top + rects.relocate.bottom) / 2;
-  const LONG move_half = std::max<LONG>(
-      stroke, (rects.relocate.right - rects.relocate.left) / 4);
-  blend_rect(
-      pixels,
-      width,
-      height,
-      {move_center_x - move_half,
-       move_center_y,
-       move_center_x + move_half + 1,
-       move_center_y + stroke},
-      255,
-      255,
-      255,
-      230);
-  blend_rect(
-      pixels,
-      width,
-      height,
-      {move_center_x,
-       move_center_y - move_half,
-       move_center_x + stroke,
-       move_center_y + move_half + 1},
-      255,
-      255,
-      255,
-      230);
+    const LONG panel_inset =
+        std::max<LONG>(stroke + 1, (rect.right - rect.left) / 5);
+    const RECT panel{
+        rect.left + panel_inset,
+        rect.top + panel_inset,
+        rect.right - panel_inset,
+        rect.bottom - panel_inset,
+    };
+    blend_rect(
+        pixels,
+        width,
+        height,
+        {panel.left, panel.top, panel.right, panel.top + stroke},
+        255,
+        255,
+        255,
+        230);
+    blend_rect(
+        pixels,
+        width,
+        height,
+        {panel.left, panel.bottom - stroke, panel.right, panel.bottom},
+        255,
+        255,
+        255,
+        230);
+    blend_rect(
+        pixels,
+        width,
+        height,
+        {panel.left, panel.top, panel.left + stroke, panel.bottom},
+        255,
+        255,
+        255,
+        230);
+    blend_rect(
+        pixels,
+        width,
+        height,
+        {panel.right - stroke, panel.top, panel.right, panel.bottom},
+        255,
+        255,
+        255,
+        230);
+    const LONG divider_x = panel.right - std::max<LONG>(
+        stroke + 1, (panel.right - panel.left) / 3);
+    blend_rect(
+        pixels,
+        width,
+        height,
+        {divider_x, panel.top, divider_x + stroke, panel.bottom},
+        255,
+        255,
+        255,
+        230);
+  }
 }
 
 void blend_pbgra_image(
@@ -297,11 +356,10 @@ struct WindowState {
   HWND window = nullptr;
   HWND tooltip_window = nullptr;
   OverlayPlatformEvents* events = nullptr;
-  std::string host_id;
-  ControlRects controls;
-  std::wstring hide_tooltip;
-  std::wstring relocate_tooltip;
-  Control pressed_control = Control::kNone;
+  std::vector<OverlayControl> controls;
+  std::vector<RECT> control_rects;
+  std::vector<std::wstring> control_tooltips;
+  std::optional<std::size_t> pressed_control;
   POINT drag_start_cursor{};
   POINT drag_last_cursor{};
   RECT drag_start_window{};
@@ -325,48 +383,74 @@ TOOLINFOW tooltip_info(
   return tool;
 }
 
-void update_tooltips(
+void replace_controls(
     WindowState& state,
-    const std::wstring& hide_text,
-    const std::wstring& relocate_text) {
-  state.hide_tooltip = hide_text;
-  state.relocate_tooltip = relocate_text;
-  TOOLINFOW hide = tooltip_info(
-      state,
-      kHideTooltipId,
-      state.controls.hide,
-      state.hide_tooltip.data());
-  TOOLINFOW relocate = tooltip_info(
-      state,
-      kRelocateTooltipId,
-      state.controls.relocate,
-      state.relocate_tooltip.data());
-  SendMessageW(
-      state.tooltip_window,
-      TTM_NEWTOOLRECTW,
-      0,
-      reinterpret_cast<LPARAM>(&hide));
-  SendMessageW(
-      state.tooltip_window,
-      TTM_UPDATETIPTEXTW,
-      0,
-      reinterpret_cast<LPARAM>(&hide));
-  SendMessageW(
-      state.tooltip_window,
-      TTM_NEWTOOLRECTW,
-      0,
-      reinterpret_cast<LPARAM>(&relocate));
-  SendMessageW(
-      state.tooltip_window,
-      TTM_UPDATETIPTEXTW,
-      0,
-      reinterpret_cast<LPARAM>(&relocate));
+    const std::vector<OverlayControl>& controls,
+    int width,
+    int height,
+    double scale_factor) {
+  const auto next_rects =
+      control_rects(width, height, scale_factor, controls.size());
+  bool unchanged =
+      state.controls.size() == controls.size() &&
+      state.control_rects.size() == next_rects.size();
+  for (std::size_t index = 0; unchanged && index < controls.size(); ++index) {
+    unchanged =
+        state.controls[index].id == controls[index].id &&
+        state.controls[index].icon == controls[index].icon &&
+        state.controls[index].tooltip == controls[index].tooltip &&
+        EqualRect(&state.control_rects[index], &next_rects[index]);
+  }
+  if (unchanged) return;
+
+  if (state.tooltip_window != nullptr) {
+    for (std::size_t index = 0; index < state.control_rects.size(); ++index) {
+      if (state.control_tooltips[index].empty()) continue;
+      TOOLINFOW tool = tooltip_info(
+          state,
+          index + 1,
+          state.control_rects[index],
+          state.control_tooltips[index].data());
+      SendMessageW(
+          state.tooltip_window,
+          TTM_DELTOOLW,
+          0,
+          reinterpret_cast<LPARAM>(&tool));
+    }
+  }
+
+  state.controls = controls;
+  state.control_rects = next_rects;
+  state.control_tooltips.clear();
+  state.control_tooltips.reserve(controls.size());
+  for (const auto& control : controls) {
+    state.control_tooltips.push_back(wide_string(control.tooltip));
+  }
+
+  if (state.tooltip_window != nullptr) {
+    for (std::size_t index = 0; index < state.control_rects.size(); ++index) {
+      if (state.control_tooltips[index].empty()) continue;
+      TOOLINFOW tool = tooltip_info(
+          state,
+          index + 1,
+          state.control_rects[index],
+          state.control_tooltips[index].data());
+      SendMessageW(
+          state.tooltip_window,
+          TTM_ADDTOOLW,
+          0,
+          reinterpret_cast<LPARAM>(&tool));
+    }
+  }
 }
 
-Control hit_test_control(const WindowState& state, POINT point) {
-  if (PtInRect(&state.controls.hide, point)) return Control::kHide;
-  if (PtInRect(&state.controls.relocate, point)) return Control::kRelocate;
-  return Control::kNone;
+std::optional<std::size_t> hit_test_control(
+    const WindowState& state,
+    POINT point) {
+  for (std::size_t index = 0; index < state.control_rects.size(); ++index) {
+    if (PtInRect(&state.control_rects[index], point)) return index;
+  }
+  return std::nullopt;
 }
 
 bool try_work_area_for_point(POINT point, RECT& work_area) {
@@ -445,7 +529,7 @@ LRESULT CALLBACK overlay_window_proc(
             static_cast<short>(HIWORD(lparam)),
         };
         state->pressed_control = hit_test_control(*state, point);
-        if (state->pressed_control != Control::kNone) {
+        if (state->pressed_control.has_value()) {
           SetCapture(window);
           return 0;
         }
@@ -501,21 +585,17 @@ LRESULT CALLBACK overlay_window_proc(
             static_cast<short>(LOWORD(lparam)),
             static_cast<short>(HIWORD(lparam)),
         };
-        const Control released_control = hit_test_control(*state, point);
-        const Control pressed_control = state->pressed_control;
-        state->pressed_control = Control::kNone;
+        const auto released_control = hit_test_control(*state, point);
+        const auto pressed_control =
+            std::exchange(state->pressed_control, std::nullopt);
         if (GetCapture() == window) ReleaseCapture();
         if (pressed_control != released_control || state->events == nullptr) {
           return 0;
         }
-        if (released_control == Control::kHide &&
-            state->events->visibility_request) {
-          state->events->visibility_request(false);
-        } else if (
-            released_control == Control::kRelocate &&
-            state->events->relocate) {
-          state->manually_positioned = false;
-          state->events->relocate(state->host_id);
+        if (released_control.has_value() &&
+            *released_control < state->controls.size() &&
+            state->events->control) {
+          state->events->control(state->controls[*released_control].id);
         }
         return 0;
       }
@@ -524,7 +604,7 @@ LRESULT CALLBACK overlay_window_proc(
             static_cast<short>(LOWORD(lparam)),
             static_cast<short>(HIWORD(lparam)),
         };
-        if (hit_test_control(*state, point) == Control::kNone &&
+        if (!hit_test_control(*state, point).has_value() &&
             state->events != nullptr && state->events->activate) {
           state->events->activate();
         }
@@ -532,7 +612,7 @@ LRESULT CALLBACK overlay_window_proc(
       }
       case WM_CAPTURECHANGED: {
         const bool moved = finish_window_drag(*state);
-        state->pressed_control = Control::kNone;
+        state->pressed_control.reset();
         if (moved) PostMessageW(window, kRefreshMessage, 0, 0);
         return 0;
       }
@@ -685,22 +765,18 @@ double scale_for_host(const OverlayHost& host) {
 SIZE fitted_size(
     UINT image_width,
     UINT image_height,
-    const OverlayHost& host,
     double max_size,
     double scale_factor,
     const RECT& work_area) {
   const int work_width = std::max<LONG>(1, work_area.right - work_area.left);
   const int work_height = std::max<LONG>(1, work_area.bottom - work_area.top);
   const double maximum_pixels = max_size * scale_factor;
-  const double minimum_pixels = 64 * scale_factor;
   const double width_limit = std::min({
       maximum_pixels,
-      std::max(host.bounds.width * scale_factor, minimum_pixels),
       static_cast<double>(work_width),
   });
   const double height_limit = std::min({
       maximum_pixels,
-      std::max(host.bounds.height * scale_factor, minimum_pixels),
       static_cast<double>(work_height),
   });
   const double scale = std::min({
@@ -804,11 +880,9 @@ struct DecodedBitmap {
 
 struct RenderItem {
   std::string id;
-  std::string host_id;
   HWND owner_window = nullptr;
   std::wstring title;
-  std::wstring hide_tooltip;
-  std::wstring relocate_tooltip;
+  std::vector<OverlayControl> controls;
   DecodedBitmap image;
   RECT frame{};
   double scale_factor = 1;
@@ -980,10 +1054,10 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
   DecodedBitmap decode_bitmap(
       const std::string& data_url,
       const std::optional<std::string>& app_icon_path,
-      const OverlayHost& host,
       double max_size,
       double scale_factor,
-      const RECT& work_area) {
+      const RECT& work_area,
+      const std::vector<OverlayControl>& controls) {
     std::vector<BYTE> encoded_image = decode_data_url(data_url);
     ComPtr<IWICStream> stream;
     ComPtr<IWICBitmapDecoder> decoder;
@@ -1019,7 +1093,6 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
     const SIZE content_size = fitted_size(
         image_width,
         image_height,
-        host,
         max_size,
         scale_factor,
         work_area);
@@ -1099,7 +1172,8 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
         static_cast<BYTE*>(pixel_data),
         target_size.cx,
         target_size.cy,
-        scale_factor);
+        scale_factor,
+        controls);
     return {
         std::move(bitmap),
         target_size.cx,
@@ -1217,27 +1291,20 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
-    TOOLINFOW hide = tooltip_info(
-        state,
-        kHideTooltipId,
-        state.controls.hide,
-        state.hide_tooltip.data());
-    TOOLINFOW relocate = tooltip_info(
-        state,
-        kRelocateTooltipId,
-        state.controls.relocate,
-        state.relocate_tooltip.data());
-    if (!SendMessageW(
-            state.tooltip_window,
-            TTM_ADDTOOLW,
-            0,
-            reinterpret_cast<LPARAM>(&hide)) ||
-        !SendMessageW(
-            state.tooltip_window,
-            TTM_ADDTOOLW,
-            0,
-            reinterpret_cast<LPARAM>(&relocate))) {
-      throw std::runtime_error("failed to add overlay tooltip");
+    for (std::size_t index = 0; index < state.control_rects.size(); ++index) {
+      if (state.control_tooltips[index].empty()) continue;
+      TOOLINFOW tool = tooltip_info(
+          state,
+          index + 1,
+          state.control_rects[index],
+          state.control_tooltips[index].data());
+      if (!SendMessageW(
+              state.tooltip_window,
+              TTM_ADDTOOLW,
+              0,
+              reinterpret_cast<LPARAM>(&tool))) {
+        throw std::runtime_error("failed to add overlay tooltip");
+      }
     }
     return state.tooltip_window;
   }
@@ -1245,11 +1312,12 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
   HWND create_overlay_window(const RenderItem& item) {
     auto state = std::make_unique<WindowState>();
     state->events = &events_;
-    state->host_id = item.host_id;
-    state->controls = control_rects(
-        item.image.width, item.image.height, item.scale_factor);
-    state->hide_tooltip = item.hide_tooltip;
-    state->relocate_tooltip = item.relocate_tooltip;
+    replace_controls(
+        *state,
+        item.controls,
+        item.image.width,
+        item.image.height,
+        item.scale_factor);
     const HWND window = CreateWindowExW(
         WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
         kOverlayClassName,
@@ -1354,7 +1422,6 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
 
       RenderItem item;
       item.id = presentation.id;
-      item.host_id = presentation.host_id;
       item.owner_window =
           reinterpret_cast<HWND>(host->second->window_handle);
       DWORD owner_process_id = 0;
@@ -1364,9 +1431,7 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
         item.owner_window = nullptr;
       }
       item.title = wide_string(host->second->title);
-      item.hide_tooltip = wide_string(snapshot.options.hide_tooltip);
-      item.relocate_tooltip =
-          wide_string(snapshot.options.relocate_tooltip);
+      item.controls = snapshot.options.controls;
       item.scale_factor = layout->second.scale_factor;
       const auto existing = windows_.find(presentation.id);
       bool preserve_position = false;
@@ -1393,15 +1458,14 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
       item.image = decode_bitmap(
           presentation.image_data,
           presentation.app_icon_path,
-          *host->second,
           snapshot.max_size,
           item.scale_factor,
-          item_work_area);
+          item_work_area,
+          item.controls);
       const bool eligible = presentation.visible && snapshot.visible;
       const SIZE stack_content_size = fitted_size(
           item.image.source_width,
           item.image.source_height,
-          *host->second,
           snapshot.max_size,
           layout->second.scale_factor,
           layout->second.work_area);
@@ -1414,7 +1478,7 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
           stack_size,
           layout->second.cursor,
           layout->second.scale_factor,
-          layout->second.work_area);
+          layout->second.work_area) || layout->second.cursor == 0;
       if (preserve_position) {
         current_frame.right = current_frame.left + item.image.width;
         current_frame.bottom = current_frame.top + item.image.height;
@@ -1468,15 +1532,12 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
             throw_windows_error("SetWindowLongPtrW(GWLP_HWNDPARENT)");
           }
         }
-        existing->second->host_id = item->host_id;
-        existing->second->controls = control_rects(
+        replace_controls(
+            *existing->second,
+            item->controls,
             item->image.width,
             item->image.height,
             item->scale_factor);
-        update_tooltips(
-            *existing->second,
-            item->hide_tooltip,
-            item->relocate_tooltip);
         SetWindowTextW(window, item->title.c_str());
       }
       present_bitmap(*item, window);

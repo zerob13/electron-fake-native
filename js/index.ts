@@ -38,11 +38,16 @@ export interface ImageFrame {
   appIconPath?: string | null
 }
 
+export type OverlayControlIcon = 'close' | 'panel-right-open'
+
+export interface OverlayControlConfig {
+  id: string
+  icon: OverlayControlIcon
+  tooltip?: string
+}
+
 export interface OverlayOptions {
-  tooltip?: {
-    hide?: string
-    relocate?: string
-  }
+  controls?: OverlayControlConfig[]
 }
 
 export interface SystemWindow {
@@ -79,7 +84,7 @@ interface NativeBinding {
   overlayHasAny(): boolean
   overlayOnMaxSizeChanged?(callback: (size: number) => void): void
   overlayOnActivate?(callback: () => void): void
-  overlayOnVisibilityRequest?(callback: (visible: boolean) => void): void
+  overlayOnControl?(callback: (controlId: string) => void): void
 
   windowsFrontmost(): FrontmostWindow | null
   windowsList(relativeTo: number): SystemWindow[]
@@ -323,9 +328,7 @@ native.overlayOnMaxSizeChanged?.((size) =>
   overlay.emit('maxSizeChanged', size),
 )
 native.overlayOnActivate?.(() => overlay.emit('activate'))
-native.overlayOnVisibilityRequest?.((visible) =>
-  overlay.emit('visibilityRequest', visible),
-)
+native.overlayOnControl?.((controlId) => overlay.emit('control', controlId))
 
 export default { overlay, windows, apps }
 
@@ -354,17 +357,36 @@ function nullableWindowFromNativeCoordinates(
 
 function validateOverlayOptions(options: OverlayOptions): void {
   requireRecord(options, 'options')
-  if (options.tooltip === undefined) return
-  requireRecord(options.tooltip, 'options.tooltip')
-  if (options.tooltip.hide !== undefined) {
-    requireNonEmptyString(options.tooltip.hide, 'options.tooltip.hide')
+  if (options.controls === undefined) return
+  if (!Array.isArray(options.controls)) {
+    throw new TypeError('options.controls must be an array')
   }
-  if (options.tooltip.relocate !== undefined) {
-    requireNonEmptyString(
-      options.tooltip.relocate,
-      'options.tooltip.relocate',
-    )
+  if (options.controls.length > 2) {
+    throw new RangeError('options.controls supports at most two controls')
   }
+  const ids = new Set<string>()
+  options.controls.forEach((control, index) => {
+    requireRecord(control, `options.controls[${index}]`)
+    requireNonEmptyString(control.id, `options.controls[${index}].id`)
+    if (ids.has(control.id)) {
+      throw new TypeError('options.controls ids must be unique')
+    }
+    ids.add(control.id)
+    if (
+      control.icon !== 'close' &&
+      control.icon !== 'panel-right-open'
+    ) {
+      throw new TypeError(
+        `options.controls[${index}].icon must be close or panel-right-open`,
+      )
+    }
+    if (control.tooltip !== undefined) {
+      requireNonEmptyString(
+        control.tooltip,
+        `options.controls[${index}].tooltip`,
+      )
+    }
+  })
 }
 
 function requireRecord(

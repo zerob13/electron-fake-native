@@ -113,7 +113,10 @@ win = new BrowserWindow({
 })
 
 overlay.start({
-  tooltip: { hide: 'Hide', relocate: 'Move to next anchor' },
+  controls: [
+    { id: 'open-panel', icon: 'panel-right-open', tooltip: 'Open panel' },
+    { id: 'close', icon: 'close', tooltip: 'Close' },
+  ],
 })
 syncOverlayHost()
 win.on('move', scheduleOverlayHostSync)
@@ -143,17 +146,16 @@ overlay.setVisible(true)
 
 ### 用户拖动行为
 
-- 按住面板的可见图片区域即可拖动；hide/relocate 控件仍正常点击。
+- 按住面板的可见图片区域即可拖动；调用方配置的控件仍正常点击。
 - 拖动在 AppKit/Win32 内完成，不产生 Renderer `mousemove` IPC，也不会激活面板。
 - 松开后，面板保留手动位置；后续 host 同步、显隐和图片尺寸更新不会重新锚定。
 - 面板会被限制在当前显示器工作区内，并保留原来的锚点堆叠槽位，避免其他面板
   在拖动时跳位。
-- 点击 relocate 控件会清除该面板的手动位置，并按
-  `trailing → bottom → leading → top` 循环到下一个 host 锚点。
 - `removeImage()`、`completeSession()`、`detachHost()` 或 `stop()` 会删除对应
   原生面板及其手动位置。库不做跨启动位置持久化。
 
-双击同一可见区域会触发 `activate`；hide 控件会请求全局隐藏：
+双击同一可见区域会触发 `activate`；点击顶部控件会通过 `control` 事件返回配置的
+`id`，具体业务行为由调用方决定：
 
 ```ts
 overlay.on('activate', () => {
@@ -161,8 +163,12 @@ overlay.on('activate', () => {
   win?.focus()
 })
 
-overlay.on('visibilityRequest', (visible) => {
-  overlay.setVisible(visible)
+overlay.on('control', (controlId) => {
+  if (controlId === 'open-panel') {
+    win?.show()
+    win?.focus()
+  }
+  if (controlId === 'close') overlay.setVisible(false)
 })
 ```
 
@@ -299,7 +305,7 @@ pnpm demo:smoke
 
 - Renderer 无法直接访问 Node、Electron 或 `nativekit`；
 - 重复 show/hide、窗口移动与跨显示器后 Overlay 状态正确；
-- Overlay 背景可拖动，控件仍可点击，relocate 能恢复锚点布局；
+- Overlay 背景可拖动，配置控件会通过 `control` 返回正确 ID；
 - Window 查询坐标与 Electron `screen` 坐标一致；
 - 打包后的应用能从 `app.asar.unpacked` 加载匹配架构的 `.node` 文件。
 
@@ -312,4 +318,4 @@ pnpm demo:smoke
 | `windowHandle has an unexpected size` | 修改了 Electron 返回的 Buffer；应原样传递。 |
 | `Linux window APIs require an available X11 display` | 当前是无显示环境或原生 Wayland；提供 `DISPLAY`，并以 `--ozone-platform=x11` 启动 Electron。 |
 | `overlays require Electron to use X11/XWayland` | Electron 没有提供可验证的 X11 窗口句柄；在创建窗口前切换 Electron Ozone backend。 |
-| Overlay 回到锚点 | presentation 被删除重建、调用了 relocate，或重启了 Overlay。 |
+| Overlay 回到锚点 | presentation 被删除重建或重启了 Overlay。 |

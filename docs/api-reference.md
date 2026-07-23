@@ -53,9 +53,10 @@ The user can drag a panel by its visible surface outside the controls.
 Manual placement survives host and image updates, remains inside the selected
 display's work area, and retains its original anchor-stack slot so other panels
 do not jump during a drag.
-Clicking the relocate control clears manual placement for that panel and moves
-it to the host's next anchor edge. Removing the presentation or stopping the
-overlay discards the manual position; it is not persisted across launches.
+The caller may configure up to two top-right controls. NativeKit renders their
+icons and emits the configured ID without assigning application semantics.
+Removing the presentation or stopping the overlay discards the manual position;
+it is not persisted across launches.
 
 ### Types
 
@@ -81,19 +82,27 @@ interface ImageFrame {
   appIconPath?: string | null
 }
 
+type OverlayControlIcon = 'close' | 'panel-right-open'
+
+interface OverlayControlConfig {
+  id: string
+  icon: OverlayControlIcon
+  tooltip?: string
+}
+
 interface OverlayOptions {
-  tooltip?: {
-    hide?: string
-    relocate?: string
-  }
+  controls?: OverlayControlConfig[]
 }
 ```
 
 Pass `BrowserWindow.getContentBounds()` as `bounds` and
 `BrowserWindow.getNativeWindowHandle()` as `windowHandle`. Width and height
-constrain panel sizing; the native handle selects the correct display, owns the
-panel on Windows, and supplies the X11 transient-parent hint on Linux. Refresh
-the host after the BrowserWindow moves, resizes, or changes display.
+identify the host and help select its display, but do not constrain panel size.
+The native handle selects the correct display, owns the panel on Windows, and
+supplies the X11 transient-parent hint on Linux. Refresh the host after the
+BrowserWindow moves, resizes, or changes display.
+The xwayland-satellite compatibility path is the exception: its child window is
+clipped by the Electron host, so the host bounds remain the hard size limit.
 
 `imageData` must be a PNG or JPEG base64 data URL no longer than 32 MiB. Decoded
 images are limited to 8192 pixels per dimension and 64 MiB of RGBA pixels.
@@ -104,9 +113,11 @@ absolute `.desktop`, executable, AppImage, or file path on Linux.
 
 #### `overlay.start(options?: OverlayOptions): boolean`
 
-Start the platform renderer or update its tooltip options. Repeated calls are
-safe. The first Linux X11 renderer draws the controls but does not display
-hover tooltips; the strings remain accepted for API symmetry.
+Start the platform renderer or replace its control configuration. Repeated
+calls are safe. Controls render in array order from left to right; at most two
+are accepted. Omitting `controls` renders no buttons. macOS and Windows display
+configured hover tooltips. The first Linux X11 renderer draws the controls but
+does not display tooltip windows.
 
 #### `overlay.stop(): boolean`
 
@@ -193,12 +204,12 @@ Whether any presentation exists, including suppressed or globally hidden ones.
 |---|---|---|
 | `maxSizeChanged` | `(size: number) => void` | `setMaxSize()` applied a new configured cap. |
 | `activate` | `() => void` | The user double-clicked a panel outside its controls. |
-| `visibilityRequest` | `(visible: boolean) => void` | A panel control requested global visibility change; currently hide emits `false`. |
+| `control` | `(controlId: string) => void` | The user clicked a configured control; the ID is emitted unchanged. |
 
 ```ts
 overlay.on('activate', () => win.show())
-overlay.on('visibilityRequest', (visible) => {
-  if (!visible) overlay.setVisible(false)
+overlay.on('control', (controlId) => {
+  if (controlId === 'close') overlay.setVisible(false)
 })
 ```
 
