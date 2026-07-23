@@ -24,18 +24,23 @@ jobs:
         include:
           - target: darwin-arm64
             arch: arm64
+            prebuild_name: node.napi.armv8.node
             runner: macos-15
           - target: darwin-x64
             arch: x64
+            prebuild_name: node.napi.node
             runner: macos-15-intel
           - target: win32-x64
             arch: x64
+            prebuild_name: node.napi.node
             runner: windows-2022
           - target: linux-x64
             arch: x64
+            prebuild_name: node.napi.node
             runner: ubuntu-22.04
           - target: linux-arm64
             arch: arm64
+            prebuild_name: node.napi.armv8.node
             runner: ubuntu-22.04-arm
 
     steps:
@@ -159,7 +164,13 @@ jobs:
             test "$minos" = "12.0"
           fi
           mkdir -p prebuilds/${{ matrix.target }}
-          cp "$node_file" prebuilds/${{ matrix.target }}/node.napi.node
+          cp "$node_file" prebuilds/${{ matrix.target }}/${{ matrix.prebuild_name }}
+
+      - name: Verify prebuild resolution
+        env:
+          EXPECTED_PREBUILD: prebuilds/${{ matrix.target }}/${{ matrix.prebuild_name }}
+          PREBUILDS_ONLY: '1'
+        run: node -e "const path = require('node:path'); const actual = require('node-gyp-build').path('.'); const expected = path.resolve(process.env.EXPECTED_PREBUILD); if (actual !== expected) throw new Error('Expected ' + expected + ', resolved ' + actual)"
 
       - name: Verify package contents
         run: npm pack --ignore-scripts --dry-run
@@ -168,6 +179,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: prebuild-${{ matrix.target }}
-          path: prebuilds/${{ matrix.target }}/node.napi.node
+          path: prebuilds/${{ matrix.target }}/${{ matrix.prebuild_name }}
           if-no-files-found: error
           retention-days: 14

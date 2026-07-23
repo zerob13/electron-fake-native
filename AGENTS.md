@@ -117,8 +117,8 @@ GitHub Actions (`.github/workflows/`):
    Electron smoke tests under Xvfb/Openbox. Uploads each as a workflow artifact.
 2. `release.yml` — runs on `v*` tag pushes or manual dispatch with an existing
    tag, builds and tests all five targets, assembles
-   `prebuilds/<platform>-<arch>/node.napi.node`, and publishes to npm
-   through Trusted Publishing.
+   `node.napi.armv8.node` for arm64 and `node.napi.node` for x64 under
+   `prebuilds/<platform>-<arch>/`, and publishes to npm through Trusted Publishing.
 
 See `docs/architecture.md` §6 for the distribution flow.
 

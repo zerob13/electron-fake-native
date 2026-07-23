@@ -51,11 +51,11 @@ pnpm add @zerob13/nativekit
 The release workflow places these Node-API prebuilds in the npm tarball:
 
 ```text
-darwin-arm64
-darwin-x64
-win32-x64
-linux-x64
-linux-arm64
+prebuilds/darwin-arm64/node.napi.armv8.node
+prebuilds/darwin-x64/node.napi.node
+prebuilds/win32-x64/node.napi.node
+prebuilds/linux-x64/node.napi.node
+prebuilds/linux-arm64/node.napi.armv8.node
 ```
 
 Linux prebuilds dynamically link GLib/GIO, GdkPixbuf, XCB, and XCB RandR.
@@ -197,7 +197,7 @@ The release workflow then:
 
 1. builds and tests macOS arm64/x64, Windows x64, and Linux x64/arm64
    independently, with Linux X11 tests running under Xvfb/Openbox;
-2. uploads standard `node.napi.node` artifacts for each platform;
+2. uploads `node.napi.armv8.node` for arm64 and `node.napi.node` for x64;
 3. assembles and inspects one npm tarball;
 4. publishes the exact tarball; and
 5. attaches it to the matching GitHub release.

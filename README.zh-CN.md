@@ -35,11 +35,11 @@ pnpm add @zerob13/nativekit
 npm 包会携带以下 Node-API 预编译文件，正常安装不需要本机 C++ 编译环境：
 
 ```text
-darwin-arm64
-darwin-x64
-win32-x64
-linux-x64
-linux-arm64
+prebuilds/darwin-arm64/node.napi.armv8.node
+prebuilds/darwin-x64/node.napi.node
+prebuilds/win32-x64/node.napi.node
+prebuilds/linux-x64/node.napi.node
+prebuilds/linux-arm64/node.napi.armv8.node
 ```
 
 Linux 预编译文件会动态链接 GLib/GIO、GdkPixbuf、XCB 与 XCB RandR。常规 X11
