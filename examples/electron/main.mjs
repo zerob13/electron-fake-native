@@ -59,7 +59,14 @@ function attachOverlayHost() {
   const windowHandle = mainWindow.getNativeWindowHandle()
   if (!overlayStarted) {
     overlay.start({
-      tooltip: { hide: 'Hide', relocate: 'Move to next anchor' },
+      controls: [
+        {
+          id: 'open-panel',
+          icon: 'panel-right-open',
+          tooltip: 'Open panel',
+        },
+        { id: 'close', icon: 'close', tooltip: 'Close' },
+      ],
     })
     overlayStarted = true
   }
@@ -285,19 +292,26 @@ function registerIpc() {
 }
 
 function wireNativeEvents() {
-  overlay.on('activate', () => {
+  const showHost = () => {
     if (mainWindow) {
       mainWindow.show()
       mainWindow.focus()
     }
+  }
+  overlay.on('activate', () => {
+    showHost()
     sendEvent('overlay', { type: 'activate' })
   })
-  overlay.on('visibilityRequest', (visible) => {
-    if (visible) startOverlayRotation()
-    else stopOverlayRotation()
+  overlay.on('control', (controlId) => {
+    if (controlId === 'open-panel') {
+      showHost()
+    } else if (controlId === 'close') {
+      stopOverlayRotation()
+      overlay.setVisible(false)
+    }
     sendEvent('overlay', {
-      type: 'visibility',
-      visible,
+      type: 'control',
+      controlId,
       active: overlay.hasActive(),
       any: overlay.hasAny(),
     })

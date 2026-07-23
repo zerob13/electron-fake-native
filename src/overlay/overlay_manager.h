@@ -14,6 +14,7 @@
 namespace nativekit {
 
 enum class AnchorEdge { kLeading, kTrailing, kTop, kBottom };
+enum class OverlayControlIcon { kClose, kPanelRightOpen };
 
 struct Anchor {
   AnchorEdge edge = AnchorEdge::kTrailing;
@@ -38,9 +39,14 @@ struct OverlayPresentation {
   std::size_t order = 0;
 };
 
+struct OverlayControl {
+  std::string id;
+  OverlayControlIcon icon = OverlayControlIcon::kClose;
+  std::string tooltip;
+};
+
 struct OverlayOptions {
-  std::string hide_tooltip = "Hide";
-  std::string relocate_tooltip = "Move";
+  std::vector<OverlayControl> controls;
 };
 
 struct OverlaySnapshot {
@@ -53,8 +59,7 @@ struct OverlaySnapshot {
 
 struct OverlayPlatformEvents {
   std::function<void()> activate;
-  std::function<void(bool)> visibility_request;
-  std::function<void(const std::string&)> relocate;
+  std::function<void(const std::string&)> control;
   std::function<void()> refresh;
 };
 

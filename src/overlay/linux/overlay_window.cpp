@@ -58,13 +58,6 @@ struct RectI {
   int height = 1;
 };
 
-enum class Control { kNone, kHide, kRelocate };
-
-struct ControlRects {
-  RectI hide;
-  RectI relocate;
-};
-
 struct PanelState {
   std::string id;
   std::string host_id;
@@ -82,7 +75,8 @@ struct PanelState {
   int drag_start_x = 0;
   int drag_start_y = 0;
   std::uint32_t last_click_time = 0;
-  Control pressed_control = Control::kNone;
+  std::vector<OverlayControl> controls;
+  std::optional<std::size_t> pressed_control;
   bool dragging = false;
   bool drag_moved = false;
   bool manually_positioned = false;
@@ -93,6 +87,7 @@ struct RenderItem {
   std::string id;
   std::string host_id;
   std::string title;
+  std::vector<OverlayControl> controls;
   xcb_window_t host_window = XCB_WINDOW_NONE;
   PixbufPtr image;
   RectI work_area;
@@ -135,17 +130,36 @@ struct Atoms {
   xcb_atom_t motif_wm_hints = XCB_ATOM_NONE;
 };
 
-ControlRects control_rects(int width, int height) {
+std::vector<RectI> control_rects(
+    int width,
+    int height,
+    std::size_t count) {
+  if (count == 0) return {};
   const int margin = std::max(1, std::min({kControlMargin, width / 8, height / 8}));
   const int gap = std::max(1, std::min(kControlGap, width / 16));
-  const int available_width = std::max(2, width - margin * 2 - gap);
+  const int gap_width = gap * static_cast<int>(count - 1);
+  const int available_width = std::max(
+      static_cast<int>(count),
+      width - margin * 2 - gap_width);
   const int button = std::max(
       1,
-      std::min({kControlSize, height - margin * 2, available_width / 2}));
-  ControlRects result;
-  result.hide = {width - margin - button, margin, button, button};
-  result.relocate = {
-      result.hide.x - gap - button, margin, button, button};
+      std::min({
+          kControlSize,
+          height - margin * 2,
+          available_width / static_cast<int>(count),
+      }));
+  const int start =
+      width - margin - static_cast<int>(count) * button - gap_width;
+  std::vector<RectI> result;
+  result.reserve(count);
+  for (std::size_t index = 0; index < count; ++index) {
+    result.push_back({
+        start + static_cast<int>(index) * (button + gap),
+        margin,
+        button,
+        button,
+    });
+  }
   return result;
 }
 
@@ -154,11 +168,16 @@ bool contains(const RectI& rect, int x, int y) {
          x < rect.x + rect.width && y < rect.y + rect.height;
 }
 
-Control hit_test_control(const PanelState& state, int x, int y) {
-  const ControlRects controls = control_rects(state.width, state.height);
-  if (contains(controls.hide, x, y)) return Control::kHide;
-  if (contains(controls.relocate, x, y)) return Control::kRelocate;
-  return Control::kNone;
+std::optional<std::size_t> hit_test_control(
+    const PanelState& state,
+    int x,
+    int y) {
+  const auto rects =
+      control_rects(state.width, state.height, state.controls.size());
+  for (std::size_t index = 0; index < rects.size(); ++index) {
+    if (contains(rects[index], x, y)) return index;
+  }
+  return std::nullopt;
 }
 
 RectI intersect_rects(const RectI& first, const RectI& second) {
@@ -178,21 +197,31 @@ RectI intersect_rects(const RectI& first, const RectI& second) {
 
 std::pair<int, int> fitted_size(
     GdkPixbuf* image,
-    const OverlayHost& host,
     double max_size,
-    const RectI& work_area) {
+    const RectI& work_area,
+    const OverlayHost* embedded_host) {
   const int source_width = gdk_pixbuf_get_width(image);
   const int source_height = gdk_pixbuf_get_height(image);
-  const double width_limit = std::min({
+  double width_limit = std::min({
       max_size,
-      std::max(host.bounds.width, static_cast<double>(kMinimumPanelSize)),
       static_cast<double>(work_area.width),
   });
-  const double height_limit = std::min({
+  double height_limit = std::min({
       max_size,
-      std::max(host.bounds.height, static_cast<double>(kMinimumPanelSize)),
       static_cast<double>(work_area.height),
   });
+  if (embedded_host != nullptr) {
+    width_limit = std::min(
+        width_limit,
+        std::max(
+            embedded_host->bounds.width,
+            static_cast<double>(kMinimumPanelSize)));
+    height_limit = std::min(
+        height_limit,
+        std::max(
+            embedded_host->bounds.height,
+            static_cast<double>(kMinimumPanelSize)));
+  }
   const double scale = std::min({
       1.0,
       width_limit / std::max(source_width, 1),
@@ -293,53 +322,112 @@ void blend_rect(
   }
 }
 
-void draw_controls(GdkPixbuf* image) {
+void blend_line(
+    GdkPixbuf* image,
+    int from_x,
+    int from_y,
+    int to_x,
+    int to_y,
+    int stroke) {
+  const int steps = std::max(std::abs(to_x - from_x), std::abs(to_y - from_y));
+  if (steps == 0) return;
+  const int radius = std::max(0, stroke / 2);
+  for (int step = 0; step <= steps; ++step) {
+    const int x = from_x + (to_x - from_x) * step / steps;
+    const int y = from_y + (to_y - from_y) * step / steps;
+    blend_rect(
+        image,
+        {x - radius, y - radius, stroke, stroke},
+        255,
+        255,
+        255,
+        230);
+  }
+}
+
+void draw_controls(
+    GdkPixbuf* image,
+    const std::vector<OverlayControl>& controls) {
   const int width = gdk_pixbuf_get_width(image);
   const int height = gdk_pixbuf_get_height(image);
-  const ControlRects controls = control_rects(width, height);
-  blend_rect(image, controls.hide, 24, 24, 24, 178);
-  blend_rect(image, controls.relocate, 24, 24, 24, 178);
+  const auto rects = control_rects(width, height, controls.size());
+  for (std::size_t index = 0; index < controls.size(); ++index) {
+    const RectI rect = rects[index];
+    blend_rect(image, rect, 24, 24, 24, 178);
+    if (controls[index].icon == OverlayControlIcon::kClose) {
+      const int center_x = rect.x + rect.width / 2;
+      const int center_y = rect.y + rect.height / 2;
+      const int half = std::max(kControlStroke, rect.width / 4);
+      blend_line(
+          image,
+          center_x - half,
+          center_y - half,
+          center_x + half,
+          center_y + half,
+          kControlStroke);
+      blend_line(
+          image,
+          center_x - half,
+          center_y + half,
+          center_x + half,
+          center_y - half,
+          kControlStroke);
+      continue;
+    }
 
-  const int hide_center_x = controls.hide.x + controls.hide.width / 2;
-  const int hide_center_y = controls.hide.y + controls.hide.height / 2;
-  const int hide_half = std::max(kControlStroke, controls.hide.width / 4);
-  blend_rect(
-      image,
-      {hide_center_x - hide_half,
-       hide_center_y,
-       hide_half * 2 + 1,
-       kControlStroke},
-      255,
-      255,
-      255,
-      230);
-
-  const int move_center_x =
-      controls.relocate.x + controls.relocate.width / 2;
-  const int move_center_y =
-      controls.relocate.y + controls.relocate.height / 2;
-  const int move_half =
-      std::max(kControlStroke, controls.relocate.width / 4);
-  blend_rect(
-      image,
-      {move_center_x - move_half,
-       move_center_y,
-       move_half * 2 + 1,
-       kControlStroke},
-      255,
-      255,
-      255,
-      230);
-  blend_rect(
-      image,
-      {move_center_x,
-       move_center_y - move_half,
-       kControlStroke,
-       move_half * 2 + 1},
-      255,
-      255,
-      255,
-      230);
+    const int panel_inset =
+        std::max(kControlStroke + 1, rect.width / 5);
+    const RectI panel{
+        rect.x + panel_inset,
+        rect.y + panel_inset,
+        rect.width - panel_inset * 2,
+        rect.height - panel_inset * 2,
+    };
+    blend_rect(
+        image,
+        {panel.x, panel.y, panel.width, kControlStroke},
+        255,
+        255,
+        255,
+        230);
+    blend_rect(
+        image,
+        {panel.x,
+         panel.y + panel.height - kControlStroke,
+         panel.width,
+         kControlStroke},
+        255,
+        255,
+        255,
+        230);
+    blend_rect(
+        image,
+        {panel.x, panel.y, kControlStroke, panel.height},
+        255,
+        255,
+        255,
+        230);
+    blend_rect(
+        image,
+        {panel.x + panel.width - kControlStroke,
+         panel.y,
+         kControlStroke,
+         panel.height},
+        255,
+        255,
+        255,
+        230);
+    const int divider_x =
+        panel.x + panel.width -
+        std::max(kControlStroke + 1, panel.width / 3);
+    blend_rect(
+        image,
+        {divider_x, panel.y, kControlStroke, panel.height},
+        255,
+        255,
+        255,
+        230);
+  }
 }
 
 void draw_icon(GdkPixbuf* image, GdkPixbuf* icon) {
@@ -1066,6 +1154,7 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
     auto state = std::make_unique<PanelState>();
     state->id = item.id;
     state->host_id = item.host_id;
+    state->controls = item.controls;
     state->window = xcb_generate_id(connection_);
     // Parent to the Electron host under xwayland-satellite; the root otherwise.
     const xcb_window_t parent =
@@ -1173,6 +1262,7 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
     }
     PanelState& state = *existing->second;
     state.host_id = item.host_id;
+    state.controls = item.controls;
     state.work_area = item.work_area;
     state.x = item.x;
     state.y = item.y;
@@ -1262,13 +1352,14 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
       PixbufPtr source(pixbuf_from_data_url(presentation.image_data));
       const auto [width, height] = fitted_size(
           source.get(),
-          *host->second,
           snapshot.max_size,
-          layout->second.work_area);
+          layout->second.work_area,
+          embed_in_host_ ? host->second : nullptr);
       RenderItem item;
       item.id = presentation.id;
       item.host_id = presentation.host_id;
       item.title = host->second->title;
+      item.controls = snapshot.options.controls;
       item.host_window =
           static_cast<xcb_window_t>(host->second->window_handle);
       item.image = scale_pixbuf(source.get(), width, height);
@@ -1280,18 +1371,20 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
             *presentation.app_icon_path, kIconSize));
         draw_icon(item.image.get(), icon.get());
       }
-      draw_controls(item.image.get());
+      draw_controls(item.image.get(), item.controls);
       item.work_area = layout->second.work_area;
       item.width = width;
       item.height = height;
 
       const bool eligible = presentation.visible && snapshot.visible;
-      const bool stack_slot_fits = presentation_fits(
-          *host->second,
-          width,
-          height,
-          layout->second.cursor,
-          layout->second.work_area);
+      const bool stack_slot_fits =
+          layout->second.cursor == 0 ||
+          presentation_fits(
+              *host->second,
+              width,
+              height,
+              layout->second.cursor,
+              layout->second.work_area);
       const auto existing = panels_.find(presentation.id);
       item.preserve_position =
           existing != panels_.end() &&
@@ -1385,8 +1478,9 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
     if (event.detail != XCB_BUTTON_INDEX_1) return;
     PanelState* state = panel_for_window(event.event);
     if (state == nullptr) return;
-    const Control control = hit_test_control(*state, event.event_x, event.event_y);
-    if (control != Control::kNone) {
+    const auto control =
+        hit_test_control(*state, event.event_x, event.event_y);
+    if (control.has_value()) {
       state->pressed_control = control;
       return;
     }
@@ -1449,17 +1543,15 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
       return;
     }
 
-    const Control released =
+    const auto released =
         hit_test_control(*state, event.event_x, event.event_y);
-    const Control pressed = std::exchange(
-        state->pressed_control, Control::kNone);
-    if (pressed == Control::kNone || pressed != released) return;
-    if (pressed == Control::kHide && events_.visibility_request) {
-      events_.visibility_request(false);
-    } else if (pressed == Control::kRelocate && events_.relocate) {
-      state->manually_positioned = false;
-      events_.relocate(state->host_id);
+    const auto pressed =
+        std::exchange(state->pressed_control, std::nullopt);
+    if (!pressed.has_value() || pressed != released ||
+        *pressed >= state->controls.size()) {
+      return;
     }
+    if (events_.control) events_.control(state->controls[*pressed].id);
   }
 
   void handle_configure(const xcb_configure_notify_event_t& event) {

@@ -45,6 +45,36 @@ NSScreen* screen_for_frame(NSRect frame) {
   return result;
 }
 
+NSString* ns_string(const std::string& value) {
+  return [NSString stringWithUTF8String:value.c_str()] ?: @"";
+}
+
+NSImage* control_image(nativekit::OverlayControlIcon icon) {
+  switch (icon) {
+    case nativekit::OverlayControlIcon::kClose:
+      return [NSImage imageWithSystemSymbolName:@"xmark"
+                      accessibilityDescription:@"Close"];
+    case nativekit::OverlayControlIcon::kPanelRightOpen:
+      return [NSImage imageWithSystemSymbolName:@"sidebar.right"
+                      accessibilityDescription:@"Open right panel"];
+  }
+  return nil;
+}
+
+bool controls_equal(
+    const std::vector<nativekit::OverlayControl>& first,
+    const std::vector<nativekit::OverlayControl>& second) {
+  if (first.size() != second.size()) return false;
+  for (std::size_t index = 0; index < first.size(); ++index) {
+    if (first[index].id != second[index].id ||
+        first[index].icon != second[index].icon ||
+        first[index].tooltip != second[index].tooltip) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 @interface NativekitOverlayPanel : NSPanel
@@ -61,24 +91,23 @@ NSScreen* screen_for_frame(NSRect frame) {
 
 @interface NativekitOverlayView : NSView <NSWindowDelegate>
 - (instancetype)initWithActivate:(std::function<void()>)activate
-                             hide:(std::function<void()>)hide
-                         relocate:(std::function<void()>)relocate
+                          control:
+                              (std::function<void(const std::string&)>)control
                             moved:(std::function<void(NSRect)>)moved;
 - (void)applyFrameFromLayout:(NSRect)frame;
 - (void)setContentImage:(NSImage*)image
-               iconPath:(NSString*)iconPath
-            hideTooltip:(NSString*)hideTooltip
-        relocateTooltip:(NSString*)relocateTooltip;
+               iconPath:(NSString*)iconPath;
+- (void)setControls:
+    (const std::vector<nativekit::OverlayControl>&)controls;
 @end
 
 @implementation NativekitOverlayView {
   NSImageView* image_view_;
   NSImageView* icon_view_;
-  NSButton* hide_button_;
-  NSButton* relocate_button_;
+  NSMutableArray<NSButton*>* control_buttons_;
+  std::vector<nativekit::OverlayControl> controls_;
   std::function<void()> activate_;
-  std::function<void()> hide_;
-  std::function<void()> relocate_;
+  std::function<void(const std::string&)> control_;
   std::function<void(NSRect)> moved_;
   BOOL applying_layout_frame_;
   BOOL has_pending_layout_origin_;
@@ -86,15 +115,14 @@ NSScreen* screen_for_frame(NSRect frame) {
 }
 
 - (instancetype)initWithActivate:(std::function<void()>)activate
-                             hide:(std::function<void()>)hide
-                         relocate:(std::function<void()>)relocate
+                          control:
+                              (std::function<void(const std::string&)>)control
                             moved:(std::function<void(NSRect)>)moved {
   self = [super initWithFrame:NSZeroRect];
   if (self == nil) return nil;
 
   activate_ = std::move(activate);
-  hide_ = std::move(hide);
-  relocate_ = std::move(relocate);
+  control_ = std::move(control);
   moved_ = std::move(moved);
   self.wantsLayer = YES;
   self.layer.backgroundColor = NSColor.clearColor.CGColor;
@@ -112,23 +140,7 @@ NSScreen* screen_for_frame(NSRect frame) {
   icon_view_.layer.masksToBounds = YES;
   [self addSubview:icon_view_];
 
-  hide_button_ = [NSButton buttonWithImage:
-      [NSImage imageWithSystemSymbolName:@"eye.slash"
-                accessibilityDescription:@"Hide overlay"]
-                                target:self
-                                action:@selector(hideOverlay:)];
-  relocate_button_ = [NSButton buttonWithImage:
-      [NSImage imageWithSystemSymbolName:@"arrow.triangle.2.circlepath"
-                accessibilityDescription:@"Move overlay"]
-                                    target:self
-                                    action:@selector(relocateOverlay:)];
-  for (NSButton* button in @[ hide_button_, relocate_button_ ]) {
-    button.bezelStyle = NSBezelStyleCircular;
-    button.bordered = YES;
-    button.focusRingType = NSFocusRingTypeNone;
-    button.contentTintColor = NSColor.labelColor;
-    [self addSubview:button];
-  }
+  control_buttons_ = [[NSMutableArray alloc] init];
 
   return self;
 }
@@ -140,9 +152,8 @@ NSScreen* screen_for_frame(NSRect frame) {
 - (NSView*)hitTest:(NSPoint)point {
   NSView* hit = [super hitTest:point];
   if (hit == nil) return nil;
-  if (hit == hide_button_ || [hit isDescendantOf:hide_button_] ||
-      hit == relocate_button_ || [hit isDescendantOf:relocate_button_]) {
-    return hit;
+  for (NSButton* button in control_buttons_) {
+    if (hit == button || [hit isDescendantOf:button]) return hit;
   }
   return self;
 }
@@ -189,39 +200,64 @@ NSScreen* screen_for_frame(NSRect frame) {
   image_view_.frame = self.bounds;
   constexpr CGFloat button_size = 26;
   constexpr CGFloat margin = 8;
-  hide_button_.frame = NSMakeRect(
-      NSMaxX(self.bounds) - margin - button_size,
-      NSMaxY(self.bounds) - margin - button_size,
-      button_size,
-      button_size);
-  relocate_button_.frame = NSMakeRect(
-      NSMinX(hide_button_.frame) - 6 - button_size,
-      NSMinY(hide_button_.frame),
-      button_size,
-      button_size);
+  constexpr CGFloat gap = 6;
+  CGFloat x = NSMaxX(self.bounds) - margin - button_size;
+  for (NSInteger index = control_buttons_.count - 1; index >= 0; --index) {
+    control_buttons_[index].frame = NSMakeRect(
+        x,
+        NSMaxY(self.bounds) - margin - button_size,
+        button_size,
+        button_size);
+    x -= button_size + gap;
+  }
   icon_view_.frame = NSMakeRect(margin, margin, 28, 28);
 }
 
 - (void)setContentImage:(NSImage*)image
-               iconPath:(NSString*)iconPath
-            hideTooltip:(NSString*)hideTooltip
-        relocateTooltip:(NSString*)relocateTooltip {
+               iconPath:(NSString*)iconPath {
   image_view_.image = image;
   image_view_.accessibilityLabel = @"Overlay image";
   icon_view_.image = iconPath.length == 0
                          ? nil
                          : [NSWorkspace.sharedWorkspace iconForFile:iconPath];
   icon_view_.hidden = icon_view_.image == nil;
-  hide_button_.toolTip = hideTooltip;
-  relocate_button_.toolTip = relocateTooltip;
 }
 
-- (void)hideOverlay:(id)sender {
-  if (hide_) hide_();
+- (void)setControls:
+    (const std::vector<nativekit::OverlayControl>&)controls {
+  if (controls_equal(controls_, controls)) return;
+  for (NSButton* button in control_buttons_) [button removeFromSuperview];
+  [control_buttons_ removeAllObjects];
+  controls_ = controls;
+
+  for (std::size_t index = 0; index < controls_.size(); ++index) {
+    const auto& control = controls_[index];
+    NSButton* button = [NSButton
+        buttonWithImage:control_image(control.icon)
+                 target:self
+                 action:@selector(controlOverlay:)];
+    button.tag = static_cast<NSInteger>(index);
+    button.bezelStyle = NSBezelStyleCircular;
+    button.bordered = YES;
+    button.focusRingType = NSFocusRingTypeNone;
+    button.contentTintColor = NSColor.labelColor;
+    button.toolTip = ns_string(control.tooltip);
+    button.accessibilityLabel = control.tooltip.empty()
+        ? ns_string(control.id)
+        : ns_string(control.tooltip);
+    [control_buttons_ addObject:button];
+    [self addSubview:button];
+  }
+  [self setNeedsLayout:YES];
 }
 
-- (void)relocateOverlay:(id)sender {
-  if (relocate_) relocate_();
+- (void)controlOverlay:(NSButton*)sender {
+  const NSInteger index = sender.tag;
+  if (index < 0 ||
+      static_cast<std::size_t>(index) >= controls_.size()) {
+    return;
+  }
+  if (control_) control_(controls_[index].id);
 }
 
 @end
@@ -229,19 +265,17 @@ NSScreen* screen_for_frame(NSRect frame) {
 namespace nativekit::platform {
 namespace {
 
-NSString* ns_string(const std::string& value) {
-  return [NSString stringWithUTF8String:value.c_str()] ?: @"";
-}
-
-NSSize fitted_size(NSImage* image, const OverlayHost& host, double max_size) {
+NSSize fitted_size(NSImage* image, double max_size, NSScreen* screen) {
   NSSize size = image.size;
   if (size.width <= 0 || size.height <= 0) {
-    size = NSMakeSize(host.bounds.width, host.bounds.height);
+    size = NSMakeSize(64, 64);
   }
+  const NSSize available =
+      screen == nil ? NSMakeSize(max_size, max_size) : screen.visibleFrame.size;
   const double width_limit =
-      std::min(max_size, std::max(host.bounds.width, 64.0));
+      std::min(max_size, std::max<double>(available.width, 1));
   const double height_limit =
-      std::min(max_size, std::max(host.bounds.height, 64.0));
+      std::min(max_size, std::max<double>(available.height, 1));
   const double scale = std::min({
       1.0,
       width_limit / std::max<double>(size.width, 1),
@@ -249,8 +283,12 @@ NSSize fitted_size(NSImage* image, const OverlayHost& host, double max_size) {
       max_size / std::max<double>(std::max(size.width, size.height), 1),
   });
   return NSMakeSize(
-      std::max<CGFloat>(64, std::floor(size.width * scale)),
-      std::max<CGFloat>(64, std::floor(size.height * scale)));
+      std::min<CGFloat>(
+          available.width,
+          std::max<CGFloat>(64, std::floor(size.width * scale))),
+      std::min<CGFloat>(
+          available.height,
+          std::max<CGFloat>(64, std::floor(size.height * scale))));
 }
 
 NSScreen* screen_for_host(const OverlayHost& host) {
@@ -268,29 +306,29 @@ NSRect frame_for_presentation(
   const CGFloat offset = host.anchor.offset;
   switch (host.anchor.edge) {
     case AnchorEdge::kLeading:
-      return NSMakeRect(
+      return clamped_frame(NSMakeRect(
           NSMinX(frame) + offset,
           NSMaxY(frame) - offset - cursor - size.height,
           size.width,
-          size.height);
+          size.height), screen);
     case AnchorEdge::kTrailing:
-      return NSMakeRect(
+      return clamped_frame(NSMakeRect(
           NSMaxX(frame) - offset - size.width,
           NSMaxY(frame) - offset - cursor - size.height,
           size.width,
-          size.height);
+          size.height), screen);
     case AnchorEdge::kTop:
-      return NSMakeRect(
+      return clamped_frame(NSMakeRect(
           NSMinX(frame) + offset + cursor,
           NSMaxY(frame) - offset - size.height,
           size.width,
-          size.height);
+          size.height), screen);
     case AnchorEdge::kBottom:
-      return NSMakeRect(
+      return clamped_frame(NSMakeRect(
           NSMinX(frame) + offset + cursor,
           NSMinY(frame) + offset,
           size.width,
-          size.height);
+          size.height), screen);
   }
   return NSMakeRect(0, 0, size.width, size.height);
 }
@@ -357,19 +395,10 @@ class MacOverlayPlatform final : public OverlayPlatform {
             NSWindowCollectionBehaviorStationary |
             NSWindowCollectionBehaviorIgnoresCycle |
             NSWindowCollectionBehaviorFullScreenAuxiliary;
-        const std::string host_id = presentation.host_id;
         const std::string presentation_id = presentation.id;
         auto* content_view = [[NativekitOverlayView alloc]
             initWithActivate:events_.activate
-                         hide:[this] {
-                           if (events_.visibility_request) {
-                             events_.visibility_request(false);
-                           }
-                         }
-                     relocate:[this, host_id, presentation_id] {
-                       manual_frames_.erase(presentation_id);
-                       if (events_.relocate) events_.relocate(host_id);
-                     }
+                      control:events_.control
                         moved:[this, presentation_id](NSRect frame) {
                           manual_frames_.insert_or_assign(
                               presentation_id, frame);
@@ -388,16 +417,16 @@ class MacOverlayPlatform final : public OverlayPlatform {
                                 ? ns_string(*presentation.app_icon_path)
                                 : nil;
       [view setContentImage:image
-                   iconPath:icon_path
-                hideTooltip:ns_string(snapshot.options.hide_tooltip)
-            relocateTooltip:ns_string(snapshot.options.relocate_tooltip)];
+                   iconPath:icon_path];
+      [view setControls:snapshot.options.controls];
       panel.title = ns_string(host->second.title);
 
-      const NSSize size = fitted_size(image, host->second, snapshot.max_size);
+      const NSSize size = fitted_size(
+          image, snapshot.max_size, screen_for_host(host->second));
       double& cursor = cursors[presentation.host_id];
       const bool eligible = presentation.visible && snapshot.visible;
       const bool stack_slot_fits =
-          presentation_fits(host->second, size, cursor);
+          cursor == 0 || presentation_fits(host->second, size, cursor);
       auto manual_frame = manual_frames_.find(presentation.id);
       if (eligible && manual_frame != manual_frames_.end()) {
         NSRect frame = manual_frame->second;

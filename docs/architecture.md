@@ -115,14 +115,17 @@ CreateWindowEx(..., host HWND, ...)
 UpdateLayeredWindow(PBGRA) + HWND_TOPMOST
 ```
 
-All tails preserve image aspect ratio, render an optional application-icon
-badge, scale controls, skip suppressed items in stack layout, and hide overflow
-items rather than overlap them. A user drag moves the native window directly
-without renderer IPC. The platform tail then owns the presentation's manual
-origin, clamps it to the current work area, and keeps its anchor-stack slot
-stable until relocate clears that state. macOS and Windows provide native
-hide/relocate hover tooltips; the first X11 renderer accepts the same strings
-but does not draw tooltip windows.
+All tails preserve image aspect ratio, size root-level panels independently of
+the host bounds, render an optional application-icon badge, scale controls,
+skip suppressed items in stack layout, and always show the first eligible item
+before hiding stack overflow. The xwayland-satellite child-window fallback
+keeps the host size limit because the compositor clips children to that host.
+A user drag moves the native window directly without renderer IPC. The platform
+tail then owns the presentation's manual origin, clamps it to the current work
+area, and keeps its anchor-stack slot stable. Callers configure up to two
+controls by ID, icon, and tooltip; platform tails render them and return only
+the clicked ID. macOS and Windows provide native hover tooltips; the first X11
+renderer accepts the same strings but does not draw tooltip windows.
 
 Linux uses one dedicated XCB event thread and one undecorated, non-focusing
 utility window per presentation. XCB RandR selects the host monitor; EWMH

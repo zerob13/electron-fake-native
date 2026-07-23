@@ -79,7 +79,12 @@ await app.whenReady()
 
 const win = new BrowserWindow({ width: 800, height: 600 })
 
-overlay.start({ tooltip: { hide: 'Hide', relocate: 'Move' } })
+overlay.start({
+  controls: [
+    { id: 'open-panel', icon: 'panel-right-open', tooltip: 'Open panel' },
+    { id: 'close', icon: 'close', tooltip: 'Close' },
+  ],
+})
 overlay.attachHost({
   id: 'main',
   title: 'Assistant',
@@ -95,6 +100,10 @@ overlay.pushImage({
 })
 
 overlay.on('activate', () => win.show())
+overlay.on('control', (controlId) => {
+  if (controlId === 'open-panel') win.show()
+  if (controlId === 'close') overlay.setVisible(false)
+})
 
 console.log(await windows.frontmost())
 

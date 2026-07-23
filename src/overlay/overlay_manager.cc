@@ -16,6 +16,7 @@ namespace nativekit {
 namespace {
 
 constexpr std::size_t kMaximumImageDataLength = 32 * 1024 * 1024;
+constexpr std::uint32_t kMaximumOverlayControls = 2;
 
 AnchorEdge parse_edge(const std::string& edge) {
   if (edge == "leading") return AnchorEdge::kLeading;
@@ -23,6 +24,14 @@ AnchorEdge parse_edge(const std::string& edge) {
   if (edge == "top") return AnchorEdge::kTop;
   if (edge == "bottom") return AnchorEdge::kBottom;
   throw std::invalid_argument("anchor.edge is invalid");
+}
+
+OverlayControlIcon parse_control_icon(const std::string& icon) {
+  if (icon == "close") return OverlayControlIcon::kClose;
+  if (icon == "panel-right-open") {
+    return OverlayControlIcon::kPanelRightOpen;
+  }
+  throw std::invalid_argument("control.icon is invalid");
 }
 
 std::string required_string(const Napi::Object& object, const char* name) {
@@ -98,22 +107,6 @@ std::uintptr_t parse_window_handle(const Napi::Value& value) {
 class OverlayManager {
  public:
   void initialize(Napi::Env env) {
-    visibility_dispatcher_.set(
-        env,
-        Napi::Function::New(env, [this](const Napi::CallbackInfo& info) {
-          if (info.Length() == 1 && info[0].IsBoolean()) {
-            handle_visibility_request(info[0].As<Napi::Boolean>());
-          }
-        }),
-        "nativekit.overlay.visibilityDispatcher");
-    relocate_dispatcher_.set(
-        env,
-        Napi::Function::New(env, [this](const Napi::CallbackInfo& info) {
-          if (info.Length() == 1 && info[0].IsString()) {
-            relocate(info[0].As<Napi::String>());
-          }
-        }),
-        "nativekit.overlay.relocateDispatcher");
     refresh_dispatcher_.set(
         env,
         Napi::Function::New(env, [this](const Napi::CallbackInfo&) {
@@ -132,9 +125,8 @@ class OverlayManager {
     if (!platform_) {
       platform_ = platform::create_overlay_platform({
           [this] { activate_callback_.emit(); },
-          [this](bool visible) { visibility_dispatcher_.emit(visible); },
-          [this](const std::string& host_id) {
-            relocate_dispatcher_.emit(host_id);
+          [this](const std::string& control_id) {
+            control_callback_.emit(control_id);
           },
           [this] { refresh_dispatcher_.emit(); },
       });
@@ -332,48 +324,19 @@ class OverlayManager {
 
   EventCallback& max_size_callback() { return max_size_callback_; }
   EventCallback& activate_callback() { return activate_callback_; }
-  EventCallback& visibility_callback() { return visibility_callback_; }
+  EventCallback& control_callback() { return control_callback_; }
   void reset_callbacks() {
     max_size_callback_.reset();
     activate_callback_.reset();
-    visibility_callback_.reset();
-    visibility_dispatcher_.reset();
-    relocate_dispatcher_.reset();
+    control_callback_.reset();
     refresh_dispatcher_.reset();
   }
 
  private:
-  void handle_visibility_request(bool visible) {
-    if (!running_) return;
-    visible_ = visible;
-    sync();
-    visibility_callback_.emit(visible);
-  }
-
   void require_running() const {
     if (!running_ || !platform_) {
       throw std::runtime_error("overlay.start() must be called first");
     }
-  }
-
-  void relocate(const std::string& host_id) {
-    const auto host = hosts_.find(host_id);
-    if (host == hosts_.end()) return;
-    switch (host->second.anchor.edge) {
-      case AnchorEdge::kTrailing:
-        host->second.anchor.edge = AnchorEdge::kBottom;
-        break;
-      case AnchorEdge::kBottom:
-        host->second.anchor.edge = AnchorEdge::kLeading;
-        break;
-      case AnchorEdge::kLeading:
-        host->second.anchor.edge = AnchorEdge::kTop;
-        break;
-      case AnchorEdge::kTop:
-        host->second.anchor.edge = AnchorEdge::kTrailing;
-        break;
-    }
-    sync();
   }
 
   void sync() {
@@ -426,9 +389,7 @@ class OverlayManager {
   std::unordered_set<std::string> suppressed_sessions_;
   EventCallback max_size_callback_;
   EventCallback activate_callback_;
-  EventCallback visibility_callback_;
-  EventCallback visibility_dispatcher_;
-  EventCallback relocate_dispatcher_;
+  EventCallback control_callback_;
   EventCallback refresh_dispatcher_;
 };
 
@@ -451,15 +412,30 @@ Napi::Value start(const Napi::CallbackInfo& info) {
     OverlayOptions options;
     if (info.Length() > 0 && info[0].IsObject()) {
       const Napi::Object root = info[0].As<Napi::Object>();
-      const Napi::Value tooltip_value = root.Get("tooltip");
-      if (tooltip_value.IsObject()) {
-        const Napi::Object tooltip = tooltip_value.As<Napi::Object>();
-        if (tooltip.Get("hide").IsString()) {
-          options.hide_tooltip = tooltip.Get("hide").As<Napi::String>();
+      const Napi::Value controls_value = root.Get("controls");
+      if (controls_value.IsArray()) {
+        const Napi::Array controls = controls_value.As<Napi::Array>();
+        if (controls.Length() > kMaximumOverlayControls) {
+          throw std::invalid_argument(
+              "controls supports at most two controls");
         }
-        if (tooltip.Get("relocate").IsString()) {
-          options.relocate_tooltip =
-              tooltip.Get("relocate").As<Napi::String>();
+        std::unordered_set<std::string> control_ids;
+        for (std::uint32_t index = 0; index < controls.Length(); ++index) {
+          const Napi::Value control_value = controls.Get(index);
+          if (!control_value.IsObject()) {
+            throw std::invalid_argument("control must be an object");
+          }
+          const Napi::Object control = control_value.As<Napi::Object>();
+          OverlayControl parsed;
+          parsed.id = required_string(control, "id");
+          if (!control_ids.insert(parsed.id).second) {
+            throw std::invalid_argument("control ids must be unique");
+          }
+          parsed.icon = parse_control_icon(required_string(control, "icon"));
+          if (control.Get("tooltip").IsString()) {
+            parsed.tooltip = control.Get("tooltip").As<Napi::String>();
+          }
+          options.controls.push_back(std::move(parsed));
         }
       }
     }
@@ -649,12 +625,12 @@ void register_overlay(Napi::Env env, Napi::Object& exports) {
                 info, "nativekit.overlay.activate");
           }));
   exports.Set(
-      "overlayOnVisibilityRequest",
+      "overlayOnControl",
       Napi::Function::New(
           env,
           [](const Napi::CallbackInfo& info) {
-            return set_callback<&OverlayManager::visibility_callback>(
-                info, "nativekit.overlay.visibilityRequest");
+            return set_callback<&OverlayManager::control_callback>(
+                info, "nativekit.overlay.control");
           }));
 }
 

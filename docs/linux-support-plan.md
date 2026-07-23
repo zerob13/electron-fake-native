@@ -97,7 +97,7 @@ dedicated X11 event thread. Each window:
 - stay above normal windows without accepting keyboard focus;
 - be hidden from taskbar and pager lists and request all-workspace visibility;
 - preserve image aspect ratio and enforce the existing decode limits;
-- render the optional application icon and hide/relocate controls;
+- render the optional application icon and up to two caller-configured controls;
 - support double-click activation and direct pointer dragging;
 - retain and clamp manual placement to the selected monitor work area; and
 - use the Electron host X11 handle for monitor and transient-parent hints.

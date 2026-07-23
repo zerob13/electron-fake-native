@@ -59,7 +59,10 @@ await app.whenReady()
 const win = new BrowserWindow({ width: 800, height: 600 })
 
 overlay.start({
-  tooltip: { hide: 'Hide', relocate: 'Move to next anchor' },
+  controls: [
+    { id: 'open-panel', icon: 'panel-right-open', tooltip: 'Open panel' },
+    { id: 'close', icon: 'close', tooltip: 'Close' },
+  ],
 })
 overlay.attachHost({
   id: 'main',
@@ -77,15 +80,19 @@ overlay.pushImage({
 })
 
 overlay.on('activate', () => win.show())
+overlay.on('control', (controlId) => {
+  if (controlId === 'open-panel') win.show()
+  if (controlId === 'close') overlay.setVisible(false)
+})
 console.log(await windows.frontmost())
 
 app.on('will-quit', () => overlay.stop())
 ```
 
 用户可以直接按住 Overlay 图片的可见区域拖动。手动位置会在 host 和图片更新时保留，
-并被限制在当前显示器工作区内；点击 Overlay 自带的 relocate 控件会清除手动位置，
-让该面板回到下一个锚点。位置只保留到 presentation 被删除或 `overlay.stop()`，
-不会跨应用启动持久化。
+并被限制在当前显示器工作区内。顶部按钮由调用方配置，点击后通过 `control` 事件
+原样返回对应 `id`；双击图片会触发 `activate`。位置只保留到 presentation 被删除
+或 `overlay.stop()`，不会跨应用启动持久化。
 
 ## Electron demo
 
