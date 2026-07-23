@@ -197,7 +197,7 @@ The release workflow then:
 
 1. builds and tests macOS arm64/x64, Windows x64, and Linux x64/arm64
    independently, with Linux X11 tests running under Xvfb/Openbox;
-2. uploads platform-named `nativekit.napi.node` artifacts;
+2. uploads standard `node.napi.node` artifacts for each platform;
 3. assembles and inspects one npm tarball;
 4. publishes the exact tarball; and
 5. attaches it to the matching GitHub release.
