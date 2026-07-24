@@ -15,6 +15,7 @@ namespace nativekit {
 
 enum class AnchorEdge { kLeading, kTrailing, kTop, kBottom };
 enum class OverlayControlIcon { kClose, kPanelRightOpen };
+enum class OverlayToolbarStyle { kSystem, kLight, kDark };
 
 struct Anchor {
   AnchorEdge edge = AnchorEdge::kTrailing;
@@ -42,10 +43,12 @@ struct OverlayPresentation {
 struct OverlayControl {
   std::string id;
   OverlayControlIcon icon = OverlayControlIcon::kClose;
+  std::optional<std::string> image_data;
   std::string tooltip;
 };
 
 struct OverlayOptions {
+  OverlayToolbarStyle toolbar_style = OverlayToolbarStyle::kSystem;
   std::vector<OverlayControl> controls;
 };
 

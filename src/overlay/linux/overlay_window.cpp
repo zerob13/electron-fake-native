@@ -34,10 +34,11 @@ namespace {
 
 constexpr int kMinimumPanelSize = 64;
 constexpr int kStackGap = 12;
-constexpr int kControlMargin = 6;
-constexpr int kControlGap = 4;
-constexpr int kControlSize = 24;
+constexpr int kControlMargin = 8;
+constexpr int kControlGap = 6;
+constexpr int kControlSize = 28;
 constexpr int kControlStroke = 2;
+constexpr int kControlImageSize = 14;
 constexpr int kIconMargin = 8;
 constexpr int kIconSize = 28;
 constexpr std::uint32_t kDoubleClickMilliseconds = 400;
@@ -76,6 +77,9 @@ struct PanelState {
   int drag_start_y = 0;
   std::uint32_t last_click_time = 0;
   std::vector<OverlayControl> controls;
+  PixbufPtr image_without_controls;
+  OverlayToolbarStyle toolbar_style = OverlayToolbarStyle::kSystem;
+  std::optional<std::size_t> hovered_control;
   std::optional<std::size_t> pressed_control;
   bool dragging = false;
   bool drag_moved = false;
@@ -89,7 +93,8 @@ struct RenderItem {
   std::string title;
   std::vector<OverlayControl> controls;
   xcb_window_t host_window = XCB_WINDOW_NONE;
-  PixbufPtr image;
+  PixbufPtr image_without_controls;
+  OverlayToolbarStyle toolbar_style = OverlayToolbarStyle::kSystem;
   RectI work_area;
   int x = 0;
   int y = 0;
@@ -166,6 +171,39 @@ std::vector<RectI> control_rects(
 bool contains(const RectI& rect, int x, int y) {
   return x >= rect.x && y >= rect.y &&
          x < rect.x + rect.width && y < rect.y + rect.height;
+}
+
+bool controls_equal(
+    const std::vector<OverlayControl>& first,
+    const std::vector<OverlayControl>& second) {
+  if (first.size() != second.size()) return false;
+  for (std::size_t index = 0; index < first.size(); ++index) {
+    if (first[index].id != second[index].id ||
+        first[index].icon != second[index].icon ||
+        first[index].image_data != second[index].image_data ||
+        first[index].tooltip != second[index].tooltip) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool has_transparent_pixel(GdkPixbuf* image) {
+  if (!gdk_pixbuf_get_has_alpha(image) ||
+      gdk_pixbuf_get_n_channels(image) != 4) {
+    return false;
+  }
+  const int width = gdk_pixbuf_get_width(image);
+  const int height = gdk_pixbuf_get_height(image);
+  const int rowstride = gdk_pixbuf_get_rowstride(image);
+  const guchar* pixels = gdk_pixbuf_get_pixels(image);
+  for (int y = 0; y < height; ++y) {
+    const guchar* row = pixels + static_cast<std::size_t>(y) * rowstride;
+    for (int x = 0; x < width; ++x) {
+      if (row[static_cast<std::size_t>(x) * 4 + 3] < 255) return true;
+    }
+  }
+  return false;
 }
 
 std::optional<std::size_t> hit_test_control(
@@ -322,13 +360,94 @@ void blend_rect(
   }
 }
 
+void blend_rounded_rect(
+    GdkPixbuf* image,
+    RectI rect,
+    int radius,
+    std::uint8_t red,
+    std::uint8_t green,
+    std::uint8_t blue,
+    std::uint8_t alpha) {
+  rect = intersect_rects(
+      rect,
+      {0, 0, gdk_pixbuf_get_width(image), gdk_pixbuf_get_height(image)});
+  radius = std::max(
+      0,
+      std::min({
+          radius,
+          std::max(0, (rect.width - 1) / 2),
+          std::max(0, (rect.height - 1) / 2),
+      }));
+  const int left_center = rect.x + radius;
+  const int right_center = rect.x + rect.width - radius - 1;
+  const int top_center = rect.y + radius;
+  const int bottom_center = rect.y + rect.height - radius - 1;
+  const int radius_squared = radius * radius;
+  for (int y = rect.y; y < rect.y + rect.height; ++y) {
+    for (int x = rect.x; x < rect.x + rect.width; ++x) {
+      const int nearest_x =
+          std::clamp(x, left_center, right_center);
+      const int nearest_y =
+          std::clamp(y, top_center, bottom_center);
+      const int delta_x = x - nearest_x;
+      const int delta_y = y - nearest_y;
+      if (delta_x * delta_x + delta_y * delta_y > radius_squared) continue;
+      blend_pixel(image, x, y, red, green, blue, alpha);
+    }
+  }
+}
+
+enum class ToolbarButtonState { kNormal, kHovered, kPressed };
+
+struct ToolbarPalette {
+  std::uint8_t background_red;
+  std::uint8_t background_green;
+  std::uint8_t background_blue;
+  std::uint8_t background_alpha;
+  std::uint8_t foreground_red;
+  std::uint8_t foreground_green;
+  std::uint8_t foreground_blue;
+  std::uint8_t foreground_alpha;
+};
+
+ToolbarPalette toolbar_palette(
+    OverlayToolbarStyle style,
+    ToolbarButtonState state) {
+  if (style == OverlayToolbarStyle::kLight) {
+    if (state == ToolbarButtonState::kPressed) {
+      return {224, 224, 224, 250, 20, 20, 20, 255};
+    }
+    const std::uint8_t background_alpha =
+        state == ToolbarButtonState::kHovered ? 250 : 225;
+    return {250, 250, 250, background_alpha, 20, 20, 20, 255};
+  }
+  if (state == ToolbarButtonState::kPressed) {
+    return {4, 4, 4, 250, 255, 255, 255, 255};
+  }
+  const std::uint8_t background =
+      state == ToolbarButtonState::kHovered ? 44 : 20;
+  const std::uint8_t background_alpha =
+      state == ToolbarButtonState::kHovered ? 245 : 215;
+  return {
+      background,
+      background,
+      background,
+      background_alpha,
+      255,
+      255,
+      255,
+      255,
+  };
+}
+
 void blend_line(
     GdkPixbuf* image,
     int from_x,
     int from_y,
     int to_x,
     int to_y,
-    int stroke) {
+    int stroke,
+    const ToolbarPalette& palette) {
   const int steps = std::max(std::abs(to_x - from_x), std::abs(to_y - from_y));
   if (steps == 0) return;
   const int radius = std::max(0, stroke / 2);
@@ -338,22 +457,84 @@ void blend_line(
     blend_rect(
         image,
         {x - radius, y - radius, stroke, stroke},
-        255,
-        255,
-        255,
-        230);
+        palette.foreground_red,
+        palette.foreground_green,
+        palette.foreground_blue,
+        palette.foreground_alpha);
+  }
+}
+
+void draw_control_image(
+    GdkPixbuf* image,
+    const RectI& rect,
+    GdkPixbuf* control_image,
+    const ToolbarPalette& palette) {
+  if (control_image == nullptr) {
+    throw std::runtime_error("overlay toolbar button image is unavailable");
+  }
+  const int width = gdk_pixbuf_get_width(control_image);
+  const int height = gdk_pixbuf_get_height(control_image);
+  const int channels = gdk_pixbuf_get_n_channels(control_image);
+  const int rowstride = gdk_pixbuf_get_rowstride(control_image);
+  const guchar* pixels = gdk_pixbuf_get_pixels(control_image);
+  const int origin_x = rect.x + (rect.width - width) / 2;
+  const int origin_y = rect.y + (rect.height - height) / 2;
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      const guchar* source =
+          pixels + static_cast<std::size_t>(y) * rowstride + x * channels;
+      const std::uint8_t source_alpha =
+          channels == 4 ? source[3] : 255;
+      blend_pixel(
+          image,
+          origin_x + x,
+          origin_y + y,
+          palette.foreground_red,
+          palette.foreground_green,
+          palette.foreground_blue,
+          static_cast<std::uint8_t>(
+              static_cast<unsigned>(source_alpha) *
+              palette.foreground_alpha / 255U));
+    }
   }
 }
 
 void draw_controls(
     GdkPixbuf* image,
-    const std::vector<OverlayControl>& controls) {
+    const std::vector<OverlayControl>& controls,
+    OverlayToolbarStyle style,
+    const std::unordered_map<std::string, PixbufPtr>& control_images,
+    std::optional<std::size_t> hovered_control = std::nullopt,
+    std::optional<std::size_t> pressed_control = std::nullopt) {
   const int width = gdk_pixbuf_get_width(image);
   const int height = gdk_pixbuf_get_height(image);
   const auto rects = control_rects(width, height, controls.size());
   for (std::size_t index = 0; index < controls.size(); ++index) {
     const RectI rect = rects[index];
-    blend_rect(image, rect, 24, 24, 24, 178);
+    const ToolbarButtonState state =
+        pressed_control == index && hovered_control == index
+        ? ToolbarButtonState::kPressed
+        : hovered_control == index
+            ? ToolbarButtonState::kHovered
+            : ToolbarButtonState::kNormal;
+    const ToolbarPalette palette = toolbar_palette(style, state);
+    blend_rounded_rect(
+        image,
+        rect,
+        std::max(1, rect.width / 4),
+        palette.background_red,
+        palette.background_green,
+        palette.background_blue,
+        palette.background_alpha);
+    if (controls[index].image_data) {
+      const auto icon = control_images.find(*controls[index].image_data);
+      draw_control_image(
+          image,
+          rect,
+          icon == control_images.end() ? nullptr : icon->second.get(),
+          palette);
+      continue;
+    }
     if (controls[index].icon == OverlayControlIcon::kClose) {
       const int center_x = rect.x + rect.width / 2;
       const int center_y = rect.y + rect.height / 2;
@@ -364,14 +545,16 @@ void draw_controls(
           center_y - half,
           center_x + half,
           center_y + half,
-          kControlStroke);
+          kControlStroke,
+          palette);
       blend_line(
           image,
           center_x - half,
           center_y + half,
           center_x + half,
           center_y - half,
-          kControlStroke);
+          kControlStroke,
+          palette);
       continue;
     }
 
@@ -386,47 +569,47 @@ void draw_controls(
     blend_rect(
         image,
         {panel.x, panel.y, panel.width, kControlStroke},
-        255,
-        255,
-        255,
-        230);
+        palette.foreground_red,
+        palette.foreground_green,
+        palette.foreground_blue,
+        palette.foreground_alpha);
     blend_rect(
         image,
         {panel.x,
          panel.y + panel.height - kControlStroke,
          panel.width,
          kControlStroke},
-        255,
-        255,
-        255,
-        230);
+        palette.foreground_red,
+        palette.foreground_green,
+        palette.foreground_blue,
+        palette.foreground_alpha);
     blend_rect(
         image,
         {panel.x, panel.y, kControlStroke, panel.height},
-        255,
-        255,
-        255,
-        230);
+        palette.foreground_red,
+        palette.foreground_green,
+        palette.foreground_blue,
+        palette.foreground_alpha);
     blend_rect(
         image,
         {panel.x + panel.width - kControlStroke,
          panel.y,
          kControlStroke,
          panel.height},
-        255,
-        255,
-        255,
-        230);
+        palette.foreground_red,
+        palette.foreground_green,
+        palette.foreground_blue,
+        palette.foreground_alpha);
     const int divider_x =
         panel.x + panel.width -
         std::max(kControlStroke + 1, panel.width / 3);
     blend_rect(
         image,
         {divider_x, panel.y, kControlStroke, panel.height},
-        255,
-        255,
-        255,
-        230);
+        palette.foreground_red,
+        palette.foreground_green,
+        palette.foreground_blue,
+        palette.foreground_alpha);
   }
 }
 
@@ -1117,6 +1300,22 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
     state.background = pixmap;
   }
 
+  void redraw_controls(PanelState& state) {
+    if (!state.image_without_controls) return;
+    PixbufPtr image(gdk_pixbuf_copy(state.image_without_controls.get()));
+    if (!image) {
+      throw std::runtime_error("GdkPixbuf could not copy the overlay image");
+    }
+    draw_controls(
+        image.get(),
+        state.controls,
+        state.toolbar_style,
+        control_images_,
+        state.hovered_control,
+        state.pressed_control);
+    upload_background(state, image.get());
+  }
+
   void set_text_property(
       xcb_window_t window,
       xcb_atom_t property,
@@ -1165,7 +1364,7 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
         screen_->black_pixel,
         XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_BUTTON_PRESS |
             XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_POINTER_MOTION |
-            XCB_EVENT_MASK_STRUCTURE_NOTIFY,
+            XCB_EVENT_MASK_LEAVE_WINDOW | XCB_EVENT_MASK_STRUCTURE_NOTIFY,
     };
     const xcb_void_cookie_t create_cookie = xcb_create_window_checked(
         connection_,
@@ -1262,7 +1461,17 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
     }
     PanelState& state = *existing->second;
     state.host_id = item.host_id;
+    if (!controls_equal(state.controls, item.controls)) {
+      state.hovered_control.reset();
+      state.pressed_control.reset();
+    }
     state.controls = item.controls;
+    state.toolbar_style = item.toolbar_style;
+    state.image_without_controls.reset(
+        gdk_pixbuf_copy(item.image_without_controls.get()));
+    if (!state.image_without_controls) {
+      throw std::runtime_error("GdkPixbuf could not copy the overlay image");
+    }
     state.work_area = item.work_area;
     state.x = item.x;
     state.y = item.y;
@@ -1295,7 +1504,7 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
           &item.host_window);
     }
     configure_window(item, state);
-    upload_background(state, item.image.get());
+    redraw_controls(state);
 
     if (item.visible && !state.visible) {
       xcb_map_window(connection_, state.window);
@@ -1323,7 +1532,57 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
     xcb_flush(connection_);
   }
 
+  void prepare_control_images(const OverlayOptions& options) {
+    std::unordered_set<std::string> active_images;
+    for (const auto& control : options.controls) {
+      if (!control.image_data) continue;
+      active_images.insert(*control.image_data);
+      if (control_images_.find(*control.image_data) !=
+          control_images_.end()) {
+        continue;
+      }
+      PixbufPtr source(pixbuf_from_data_url(*control.image_data));
+      if (gdk_pixbuf_get_width(source.get()) > 256 ||
+          gdk_pixbuf_get_height(source.get()) > 256) {
+        throw std::runtime_error(
+            "overlay toolbar button image dimensions exceed 256 pixels");
+      }
+      if (!has_transparent_pixel(source.get())) {
+        throw std::runtime_error(
+            "overlay toolbar button image must contain a transparent pixel");
+      }
+      const int source_width = gdk_pixbuf_get_width(source.get());
+      const int source_height = gdk_pixbuf_get_height(source.get());
+      const double scale = std::min(
+          static_cast<double>(kControlImageSize) / source_width,
+          static_cast<double>(kControlImageSize) / source_height);
+      const int target_width = std::max(
+          1, static_cast<int>(std::lround(source_width * scale)));
+      const int target_height = std::max(
+          1, static_cast<int>(std::lround(source_height * scale)));
+      PixbufPtr scaled(gdk_pixbuf_scale_simple(
+          source.get(),
+          target_width,
+          target_height,
+          GDK_INTERP_BILINEAR));
+      if (!scaled) {
+        throw std::runtime_error(
+            "GdkPixbuf could not scale the toolbar button image");
+      }
+      control_images_.emplace(*control.image_data, std::move(scaled));
+    }
+    for (auto iterator = control_images_.begin();
+         iterator != control_images_.end();) {
+      if (active_images.find(iterator->first) == active_images.end()) {
+        iterator = control_images_.erase(iterator);
+      } else {
+        ++iterator;
+      }
+    }
+  }
+
   void apply_update(const OverlaySnapshot& snapshot) {
+    prepare_control_images(snapshot.options);
     std::unordered_map<std::string, const OverlayHost*> hosts;
     hosts.reserve(snapshot.hosts.size());
     for (const auto& host : snapshot.hosts) {
@@ -1362,16 +1621,16 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
       item.controls = snapshot.options.controls;
       item.host_window =
           static_cast<xcb_window_t>(host->second->window_handle);
-      item.image = scale_pixbuf(source.get(), width, height);
-      if (!item.image) {
+      item.toolbar_style = snapshot.options.toolbar_style;
+      item.image_without_controls = scale_pixbuf(source.get(), width, height);
+      if (!item.image_without_controls) {
         throw std::runtime_error("GdkPixbuf could not scale the overlay image");
       }
       if (presentation.app_icon_path) {
         PixbufPtr icon(app_icon_pixbuf(
             *presentation.app_icon_path, kIconSize));
-        draw_icon(item.image.get(), icon.get());
+        draw_icon(item.image_without_controls.get(), icon.get());
       }
-      draw_controls(item.image.get(), item.controls);
       item.work_area = layout->second.work_area;
       item.width = width;
       item.height = height;
@@ -1452,6 +1711,9 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
         case XCB_MOTION_NOTIFY:
           handle_motion(*reinterpret_cast<xcb_motion_notify_event_t*>(event));
           break;
+        case XCB_LEAVE_NOTIFY:
+          handle_leave(*reinterpret_cast<xcb_leave_notify_event_t*>(event));
+          break;
         case XCB_CONFIGURE_NOTIFY:
           handle_configure(
               *reinterpret_cast<xcb_configure_notify_event_t*>(event));
@@ -1481,7 +1743,9 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
     const auto control =
         hit_test_control(*state, event.event_x, event.event_y);
     if (control.has_value()) {
+      state->hovered_control = control;
       state->pressed_control = control;
+      redraw_controls(*state);
       return;
     }
     const std::uint32_t elapsed = event.time - state->last_click_time;
@@ -1502,10 +1766,14 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
 
   void handle_motion(const xcb_motion_notify_event_t& event) {
     PanelState* state = panel_for_window(event.event);
-    if (state == nullptr || !state->dragging ||
-        (event.state & XCB_BUTTON_MASK_1) == 0) {
-      return;
+    if (state == nullptr) return;
+    const auto hovered =
+        hit_test_control(*state, event.event_x, event.event_y);
+    if (state->hovered_control != hovered) {
+      state->hovered_control = hovered;
+      redraw_controls(*state);
     }
+    if (!state->dragging || (event.state & XCB_BUTTON_MASK_1) == 0) return;
     const int x = state->drag_start_x + event.root_x - state->drag_start_root_x;
     const int y = state->drag_start_y + event.root_y - state->drag_start_root_y;
     const auto [clamped_x, clamped_y] = clamped_origin(
@@ -1525,6 +1793,13 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
         XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
             XCB_CONFIG_WINDOW_STACK_MODE,
         values);
+  }
+
+  void handle_leave(const xcb_leave_notify_event_t& event) {
+    PanelState* state = panel_for_window(event.event);
+    if (state == nullptr || !state->hovered_control.has_value()) return;
+    state->hovered_control.reset();
+    redraw_controls(*state);
   }
 
   void handle_button_release(const xcb_button_release_event_t& event) {
@@ -1547,6 +1822,7 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
         hit_test_control(*state, event.event_x, event.event_y);
     const auto pressed =
         std::exchange(state->pressed_control, std::nullopt);
+    redraw_controls(*state);
     if (!pressed.has_value() || pressed != released ||
         *pressed >= state->controls.size()) {
       return;
@@ -1588,6 +1864,7 @@ class LinuxOverlayPlatform final : public OverlayPlatform {
   xcb_screen_t* screen_ = nullptr;
   PixelFormat pixel_format_;
   Atoms atoms_;
+  std::unordered_map<std::string, PixbufPtr> control_images_;
   std::unordered_map<std::string, std::unique_ptr<PanelState>> panels_;
 };
 

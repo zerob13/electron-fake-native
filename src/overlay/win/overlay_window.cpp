@@ -43,9 +43,9 @@ constexpr std::size_t kMaximumDataUrlLength = 32 * 1024 * 1024;
 constexpr std::uint64_t kMaximumDecodedBytes = 64 * 1024 * 1024;
 constexpr UINT kMaximumImageDimension = 8192;
 constexpr int kStackGap = 12;
-constexpr int kControlMargin = 6;
-constexpr int kControlGap = 4;
-constexpr int kControlSize = 24;
+constexpr int kControlMargin = 8;
+constexpr int kControlGap = 6;
+constexpr int kControlSize = 28;
 constexpr int kControlStroke = 2;
 constexpr int kIconMargin = 8;
 constexpr int kIconSize = 28;
@@ -200,6 +200,114 @@ void blend_rect(
   }
 }
 
+void blend_rounded_rect(
+    BYTE* pixels,
+    int width,
+    int height,
+    RECT rect,
+    LONG radius,
+    BYTE red,
+    BYTE green,
+    BYTE blue,
+    BYTE alpha) {
+  rect.left = std::clamp(rect.left, 0L, static_cast<LONG>(width));
+  rect.right = std::clamp(rect.right, 0L, static_cast<LONG>(width));
+  rect.top = std::clamp(rect.top, 0L, static_cast<LONG>(height));
+  rect.bottom = std::clamp(rect.bottom, 0L, static_cast<LONG>(height));
+  radius = std::max<LONG>(
+      0,
+      std::min({
+          radius,
+          std::max<LONG>(0, (rect.right - rect.left - 1) / 2),
+          std::max<LONG>(0, (rect.bottom - rect.top - 1) / 2),
+      }));
+  const LONG left_center = rect.left + radius;
+  const LONG right_center = rect.right - radius - 1;
+  const LONG top_center = rect.top + radius;
+  const LONG bottom_center = rect.bottom - radius - 1;
+  const LONG radius_squared = radius * radius;
+  for (LONG y = rect.top; y < rect.bottom; ++y) {
+    for (LONG x = rect.left; x < rect.right; ++x) {
+      const LONG nearest_x =
+          std::clamp(x, left_center, right_center);
+      const LONG nearest_y =
+          std::clamp(y, top_center, bottom_center);
+      const LONG delta_x = x - nearest_x;
+      const LONG delta_y = y - nearest_y;
+      if (delta_x * delta_x + delta_y * delta_y > radius_squared) continue;
+      blend_pixel(
+          pixels + (static_cast<std::size_t>(y) * width + x) * 4,
+          red,
+          green,
+          blue,
+          alpha);
+    }
+  }
+}
+
+enum class ToolbarButtonState { kNormal, kHovered, kPressed };
+
+struct ToolbarPalette {
+  BYTE background_red;
+  BYTE background_green;
+  BYTE background_blue;
+  BYTE background_alpha;
+  BYTE foreground_red;
+  BYTE foreground_green;
+  BYTE foreground_blue;
+  BYTE foreground_alpha;
+};
+
+ToolbarPalette toolbar_palette(
+    OverlayToolbarStyle style,
+    ToolbarButtonState state) {
+  if (style == OverlayToolbarStyle::kLight) {
+    if (state == ToolbarButtonState::kPressed) {
+      return {224, 224, 224, 250, 20, 20, 20, 255};
+    }
+    const BYTE background_alpha =
+        state == ToolbarButtonState::kHovered ? 250 : 225;
+    return {250, 250, 250, background_alpha, 20, 20, 20, 255};
+  }
+  if (style == OverlayToolbarStyle::kDark) {
+    if (state == ToolbarButtonState::kPressed) {
+      return {4, 4, 4, 250, 255, 255, 255, 255};
+    }
+    const BYTE background =
+        state == ToolbarButtonState::kHovered ? 44 : 20;
+    const BYTE background_alpha =
+        state == ToolbarButtonState::kHovered ? 245 : 215;
+    return {
+        background,
+        background,
+        background,
+        background_alpha,
+        255,
+        255,
+        255,
+        255,
+    };
+  }
+  const COLORREF background = state == ToolbarButtonState::kPressed
+      ? GetSysColor(COLOR_HIGHLIGHT)
+      : GetSysColor(COLOR_BTNFACE);
+  const COLORREF foreground = state == ToolbarButtonState::kPressed
+      ? GetSysColor(COLOR_HIGHLIGHTTEXT)
+      : GetSysColor(COLOR_BTNTEXT);
+  const BYTE background_alpha =
+      state == ToolbarButtonState::kHovered ? 250 : 225;
+  return {
+      GetRValue(background),
+      GetGValue(background),
+      GetBValue(background),
+      background_alpha,
+      GetRValue(foreground),
+      GetGValue(foreground),
+      GetBValue(foreground),
+      255,
+  };
+}
+
 void blend_line(
     BYTE* pixels,
     int width,
@@ -208,7 +316,8 @@ void blend_line(
     LONG from_y,
     LONG to_x,
     LONG to_y,
-    LONG stroke) {
+    LONG stroke,
+    const ToolbarPalette& palette) {
   const LONG steps = std::max(std::abs(to_x - from_x), std::abs(to_y - from_y));
   if (steps == 0) return;
   const LONG radius = std::max<LONG>(0, stroke / 2);
@@ -220,107 +329,75 @@ void blend_line(
         width,
         height,
         {x - radius, y - radius, x - radius + stroke, y - radius + stroke},
-        255,
-        255,
-        255,
-        230);
+        palette.foreground_red,
+        palette.foreground_green,
+        palette.foreground_blue,
+        palette.foreground_alpha);
   }
 }
 
-void draw_controls(
+void draw_builtin_control(
     BYTE* pixels,
     int width,
     int height,
-    double scale_factor,
-    const std::vector<OverlayControl>& controls) {
-  const auto rects =
-      control_rects(width, height, scale_factor, controls.size());
-  const LONG stroke = scaled_pixels(kControlStroke, scale_factor);
-  for (std::size_t index = 0; index < controls.size(); ++index) {
-    const RECT rect = rects[index];
-    blend_rect(pixels, width, height, rect, 24, 24, 24, 178);
-    if (controls[index].icon == OverlayControlIcon::kClose) {
-      const LONG center_x = (rect.left + rect.right) / 2;
-      const LONG center_y = (rect.top + rect.bottom) / 2;
-      const LONG half =
-          std::max<LONG>(stroke, (rect.right - rect.left) / 4);
-      blend_line(
-          pixels,
-          width,
-          height,
-          center_x - half,
-          center_y - half,
-          center_x + half,
-          center_y + half,
-          stroke);
-      blend_line(
-          pixels,
-          width,
-          height,
-          center_x - half,
-          center_y + half,
-          center_x + half,
-          center_y - half,
-          stroke);
-      continue;
-    }
-
-    const LONG panel_inset =
-        std::max<LONG>(stroke + 1, (rect.right - rect.left) / 5);
-    const RECT panel{
-        rect.left + panel_inset,
-        rect.top + panel_inset,
-        rect.right - panel_inset,
-        rect.bottom - panel_inset,
-    };
-    blend_rect(
+    RECT rect,
+    LONG stroke,
+    OverlayControlIcon icon,
+    const ToolbarPalette& palette) {
+  if (icon == OverlayControlIcon::kClose) {
+    const LONG center_x = (rect.left + rect.right) / 2;
+    const LONG center_y = (rect.top + rect.bottom) / 2;
+    const LONG half =
+        std::max<LONG>(stroke, (rect.right - rect.left) / 4);
+    blend_line(
         pixels,
         width,
         height,
-        {panel.left, panel.top, panel.right, panel.top + stroke},
-        255,
-        255,
-        255,
-        230);
-    blend_rect(
+        center_x - half,
+        center_y - half,
+        center_x + half,
+        center_y + half,
+        stroke,
+        palette);
+    blend_line(
         pixels,
         width,
         height,
-        {panel.left, panel.bottom - stroke, panel.right, panel.bottom},
-        255,
-        255,
-        255,
-        230);
-    blend_rect(
-        pixels,
-        width,
-        height,
-        {panel.left, panel.top, panel.left + stroke, panel.bottom},
-        255,
-        255,
-        255,
-        230);
-    blend_rect(
-        pixels,
-        width,
-        height,
-        {panel.right - stroke, panel.top, panel.right, panel.bottom},
-        255,
-        255,
-        255,
-        230);
-    const LONG divider_x = panel.right - std::max<LONG>(
-        stroke + 1, (panel.right - panel.left) / 3);
-    blend_rect(
-        pixels,
-        width,
-        height,
-        {divider_x, panel.top, divider_x + stroke, panel.bottom},
-        255,
-        255,
-        255,
-        230);
+        center_x - half,
+        center_y + half,
+        center_x + half,
+        center_y - half,
+        stroke,
+        palette);
+    return;
   }
+
+  const LONG panel_inset =
+      std::max<LONG>(stroke + 1, (rect.right - rect.left) / 5);
+  const RECT panel{
+      rect.left + panel_inset,
+      rect.top + panel_inset,
+      rect.right - panel_inset,
+      rect.bottom - panel_inset,
+  };
+  const auto line = [&](RECT line_rect) {
+    blend_rect(
+        pixels,
+        width,
+        height,
+        line_rect,
+        palette.foreground_red,
+        palette.foreground_green,
+        palette.foreground_blue,
+        palette.foreground_alpha);
+  };
+  line({panel.left, panel.top, panel.right, panel.top + stroke});
+  line({panel.left, panel.bottom - stroke, panel.right, panel.bottom});
+  line({panel.left, panel.top, panel.left + stroke, panel.bottom});
+  line({panel.right - stroke, panel.top, panel.right, panel.bottom});
+  const LONG divider_x = panel.right - std::max<LONG>(
+      stroke + 1, (panel.right - panel.left) / 3);
+  line({divider_x, panel.top, divider_x + stroke, panel.bottom});
 }
 
 void blend_pbgra_image(
@@ -359,10 +436,13 @@ struct WindowState {
   std::vector<OverlayControl> controls;
   std::vector<RECT> control_rects;
   std::vector<std::wstring> control_tooltips;
+  std::optional<std::size_t> hovered_control;
   std::optional<std::size_t> pressed_control;
   POINT drag_start_cursor{};
   POINT drag_last_cursor{};
   RECT drag_start_window{};
+  bool tracking_mouse = false;
+  bool refresh_pending = false;
   bool dragging = false;
   bool drag_moved = false;
   bool manually_positioned = false;
@@ -398,6 +478,7 @@ void replace_controls(
     unchanged =
         state.controls[index].id == controls[index].id &&
         state.controls[index].icon == controls[index].icon &&
+        state.controls[index].image_data == controls[index].image_data &&
         state.controls[index].tooltip == controls[index].tooltip &&
         EqualRect(&state.control_rects[index], &next_rects[index]);
   }
@@ -421,6 +502,8 @@ void replace_controls(
 
   state.controls = controls;
   state.control_rects = next_rects;
+  state.hovered_control.reset();
+  state.pressed_control.reset();
   state.control_tooltips.clear();
   state.control_tooltips.reserve(controls.size());
   for (const auto& control : controls) {
@@ -451,6 +534,14 @@ std::optional<std::size_t> hit_test_control(
     if (PtInRect(&state.control_rects[index], point)) return index;
   }
   return std::nullopt;
+}
+
+void request_control_refresh(WindowState& state) {
+  if (state.refresh_pending || state.window == nullptr) return;
+  state.refresh_pending = true;
+  if (!PostMessageW(state.window, kRefreshMessage, 0, 0)) {
+    state.refresh_pending = false;
+  }
 }
 
 bool try_work_area_for_point(POINT point, RECT& work_area) {
@@ -530,6 +621,8 @@ LRESULT CALLBACK overlay_window_proc(
         };
         state->pressed_control = hit_test_control(*state, point);
         if (state->pressed_control.has_value()) {
+          state->hovered_control = state->pressed_control;
+          request_control_refresh(*state);
           SetCapture(window);
           return 0;
         }
@@ -543,6 +636,22 @@ LRESULT CALLBACK overlay_window_proc(
         return 0;
       }
       case WM_MOUSEMOVE: {
+        const POINT point{
+            static_cast<short>(LOWORD(lparam)),
+            static_cast<short>(HIWORD(lparam)),
+        };
+        const auto hovered = hit_test_control(*state, point);
+        if (state->hovered_control != hovered) {
+          state->hovered_control = hovered;
+          request_control_refresh(*state);
+        }
+        if (!state->tracking_mouse && GetCapture() != window) {
+          TRACKMOUSEEVENT tracking{};
+          tracking.cbSize = sizeof(tracking);
+          tracking.dwFlags = TME_LEAVE;
+          tracking.hwndTrack = window;
+          state->tracking_mouse = TrackMouseEvent(&tracking) != FALSE;
+        }
         if (!state->dragging || (wparam & MK_LBUTTON) == 0) return 0;
         POINT cursor{};
         RECT work_area{};
@@ -574,6 +683,13 @@ LRESULT CALLBACK overlay_window_proc(
         }
         return 0;
       }
+      case WM_MOUSELEAVE:
+        state->tracking_mouse = false;
+        if (state->hovered_control.has_value()) {
+          state->hovered_control.reset();
+          request_control_refresh(*state);
+        }
+        return 0;
       case WM_LBUTTONUP: {
         if (state->dragging) {
           const bool moved = finish_window_drag(*state);
@@ -588,6 +704,7 @@ LRESULT CALLBACK overlay_window_proc(
         const auto released_control = hit_test_control(*state, point);
         const auto pressed_control =
             std::exchange(state->pressed_control, std::nullopt);
+        request_control_refresh(*state);
         if (GetCapture() == window) ReleaseCapture();
         if (pressed_control != released_control || state->events == nullptr) {
           return 0;
@@ -612,11 +729,13 @@ LRESULT CALLBACK overlay_window_proc(
       }
       case WM_CAPTURECHANGED: {
         const bool moved = finish_window_drag(*state);
+        const bool was_pressed = state->pressed_control.has_value();
         state->pressed_control.reset();
-        if (moved) PostMessageW(window, kRefreshMessage, 0, 0);
+        if (moved || was_pressed) request_control_refresh(*state);
         return 0;
       }
       case kRefreshMessage:
+        state->refresh_pending = false;
         if (state->events != nullptr && state->events->refresh) {
           state->events->refresh();
         }
@@ -878,6 +997,12 @@ struct DecodedBitmap {
   UINT source_height = 0;
 };
 
+struct DecodedControlImage {
+  std::vector<BYTE> pixels;
+  int width = 0;
+  int height = 0;
+};
+
 struct RenderItem {
   std::string id;
   HWND owner_window = nullptr;
@@ -1057,7 +1182,10 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
       double max_size,
       double scale_factor,
       const RECT& work_area,
-      const std::vector<OverlayControl>& controls) {
+      const std::vector<OverlayControl>& controls,
+      OverlayToolbarStyle toolbar_style,
+      std::optional<std::size_t> hovered_control,
+      std::optional<std::size_t> pressed_control) {
     std::vector<BYTE> encoded_image = decode_data_url(data_url);
     ComPtr<IWICStream> stream;
     ComPtr<IWICBitmapDecoder> decoder;
@@ -1173,7 +1301,10 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
         target_size.cx,
         target_size.cy,
         scale_factor,
-        controls);
+        controls,
+        toolbar_style,
+        hovered_control,
+        pressed_control);
     return {
         std::move(bitmap),
         target_size.cx,
@@ -1181,6 +1312,215 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
         image_width,
         image_height,
     };
+  }
+
+  const DecodedControlImage& control_image(
+      const std::string& data_url,
+      int size) {
+    const std::string key = std::to_string(size) + ":" + data_url;
+    if (const auto existing = control_images_.find(key);
+        existing != control_images_.end()) {
+      return existing->second;
+    }
+    if (control_images_.size() >= 8) control_images_.clear();
+
+    std::vector<BYTE> encoded_image = decode_data_url(data_url);
+    ComPtr<IWICStream> stream;
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    ComPtr<IWICBitmapScaler> scaler;
+    ComPtr<IWICFormatConverter> source_converter;
+    ComPtr<IWICFormatConverter> converter;
+    require_hresult(
+        wic_factory_->CreateStream(&stream),
+        "IWICImagingFactory::CreateStream(toolbar)");
+    require_hresult(
+        stream->InitializeFromMemory(
+            encoded_image.data(), static_cast<DWORD>(encoded_image.size())),
+        "IWICStream::InitializeFromMemory(toolbar)");
+    require_hresult(
+        wic_factory_->CreateDecoderFromStream(
+            stream.Get(),
+            nullptr,
+            WICDecodeMetadataCacheOnDemand,
+            &decoder),
+        "IWICImagingFactory::CreateDecoderFromStream(toolbar)");
+    require_hresult(
+        decoder->GetFrame(0, &frame),
+        "IWICBitmapDecoder::GetFrame(toolbar)");
+    UINT source_width = 0;
+    UINT source_height = 0;
+    require_hresult(
+        frame->GetSize(&source_width, &source_height),
+        "IWICBitmapFrameDecode::GetSize(toolbar)");
+    if (source_width == 0 || source_height == 0 ||
+        source_width > 256 || source_height > 256) {
+      throw std::runtime_error(
+          "overlay toolbar button image dimensions exceed 256 pixels");
+    }
+    require_hresult(
+        wic_factory_->CreateFormatConverter(&source_converter),
+        "IWICImagingFactory::CreateFormatConverter(toolbar source)");
+    require_hresult(
+        source_converter->Initialize(
+            frame.Get(),
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0,
+            WICBitmapPaletteTypeCustom),
+        "IWICFormatConverter::Initialize(toolbar source)");
+    const UINT source_stride = source_width * 4;
+    std::vector<BYTE> source_pixels(
+        static_cast<std::size_t>(source_stride) * source_height);
+    require_hresult(
+        source_converter->CopyPixels(
+            nullptr,
+            source_stride,
+            static_cast<UINT>(source_pixels.size()),
+            source_pixels.data()),
+        "IWICFormatConverter::CopyPixels(toolbar source)");
+    bool has_transparent_pixel = false;
+    for (std::size_t offset = 3; offset < source_pixels.size(); offset += 4) {
+      if (source_pixels[offset] < 255) {
+        has_transparent_pixel = true;
+        break;
+      }
+    }
+    if (!has_transparent_pixel) {
+      throw std::runtime_error(
+          "overlay toolbar button image must contain a transparent pixel");
+    }
+    const double scale = std::min(
+        static_cast<double>(size) / source_width,
+        static_cast<double>(size) / source_height);
+    const int target_width = std::max(
+        1, static_cast<int>(std::lround(source_width * scale)));
+    const int target_height = std::max(
+        1, static_cast<int>(std::lround(source_height * scale)));
+    require_hresult(
+        wic_factory_->CreateBitmapScaler(&scaler),
+        "IWICImagingFactory::CreateBitmapScaler(toolbar)");
+    require_hresult(
+        scaler->Initialize(
+            frame.Get(),
+            static_cast<UINT>(target_width),
+            static_cast<UINT>(target_height),
+            WICBitmapInterpolationModeFant),
+        "IWICBitmapScaler::Initialize(toolbar)");
+    require_hresult(
+        wic_factory_->CreateFormatConverter(&converter),
+        "IWICImagingFactory::CreateFormatConverter(toolbar)");
+    require_hresult(
+        converter->Initialize(
+            scaler.Get(),
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0,
+            WICBitmapPaletteTypeCustom),
+        "IWICFormatConverter::Initialize(toolbar)");
+
+    DecodedControlImage image;
+    image.width = target_width;
+    image.height = target_height;
+    image.pixels.resize(
+        static_cast<std::size_t>(target_width) * target_height * 4);
+    const UINT stride = static_cast<UINT>(target_width) * 4;
+    require_hresult(
+        converter->CopyPixels(
+            nullptr,
+            stride,
+            static_cast<UINT>(image.pixels.size()),
+            image.pixels.data()),
+        "IWICFormatConverter::CopyPixels(toolbar)");
+    return control_images_.emplace(key, std::move(image)).first->second;
+  }
+
+  void draw_control_image(
+      BYTE* destination,
+      int destination_width,
+      RECT rect,
+      const std::string& data_url,
+      const ToolbarPalette& palette) {
+    const int button_size = std::max<LONG>(1, rect.right - rect.left);
+    const int icon_size = std::max(1, button_size / 2);
+    const DecodedControlImage& image =
+        control_image(data_url, icon_size);
+    const int origin_x =
+        rect.left + (button_size - image.width) / 2;
+    const int origin_y =
+        rect.top + (button_size - image.height) / 2;
+    for (int y = 0; y < image.height; ++y) {
+      for (int x = 0; x < image.width; ++x) {
+        const BYTE alpha = image.pixels[
+            (static_cast<std::size_t>(y) * image.width + x) * 4 + 3];
+        if (alpha == 0) continue;
+        blend_pixel(
+            destination +
+                (static_cast<std::size_t>(origin_y + y) *
+                     destination_width +
+                 origin_x + x) *
+                    4,
+            palette.foreground_red,
+            palette.foreground_green,
+            palette.foreground_blue,
+            static_cast<BYTE>(
+                static_cast<unsigned>(alpha) *
+                palette.foreground_alpha / 255U));
+      }
+    }
+  }
+
+  void draw_controls(
+      BYTE* pixels,
+      int width,
+      int height,
+      double scale_factor,
+      const std::vector<OverlayControl>& controls,
+      OverlayToolbarStyle style,
+      std::optional<std::size_t> hovered_control,
+      std::optional<std::size_t> pressed_control) {
+    const auto rects =
+        control_rects(width, height, scale_factor, controls.size());
+    const LONG stroke = scaled_pixels(kControlStroke, scale_factor);
+    for (std::size_t index = 0; index < controls.size(); ++index) {
+      const RECT rect = rects[index];
+      const ToolbarButtonState state =
+          pressed_control == index && hovered_control == index
+          ? ToolbarButtonState::kPressed
+          : hovered_control == index
+              ? ToolbarButtonState::kHovered
+              : ToolbarButtonState::kNormal;
+      const ToolbarPalette palette = toolbar_palette(style, state);
+      blend_rounded_rect(
+          pixels,
+          width,
+          height,
+          rect,
+          std::max<LONG>(1, (rect.right - rect.left) / 4),
+          palette.background_red,
+          palette.background_green,
+          palette.background_blue,
+          palette.background_alpha);
+      if (controls[index].image_data) {
+        draw_control_image(
+            pixels,
+            width,
+            rect,
+            *controls[index].image_data,
+            palette);
+      } else {
+        draw_builtin_control(
+            pixels,
+            width,
+            height,
+            rect,
+            stroke,
+            controls[index].icon,
+            palette);
+      }
+    }
   }
 
   void draw_app_icon(
@@ -1455,13 +1795,34 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
           item.scale_factor = scale_for_window(existing->second->window);
         }
       }
+      std::optional<std::size_t> hovered_control;
+      std::optional<std::size_t> pressed_control;
+      bool same_controls = existing != windows_.end() &&
+          existing->second->controls.size() == item.controls.size();
+      for (std::size_t index = 0;
+           same_controls && index < item.controls.size();
+           ++index) {
+        const auto& previous = existing->second->controls[index];
+        const auto& current = item.controls[index];
+        same_controls = previous.id == current.id &&
+            previous.icon == current.icon &&
+            previous.image_data == current.image_data &&
+            previous.tooltip == current.tooltip;
+      }
+      if (same_controls) {
+        hovered_control = existing->second->hovered_control;
+        pressed_control = existing->second->pressed_control;
+      }
       item.image = decode_bitmap(
           presentation.image_data,
           presentation.app_icon_path,
           snapshot.max_size,
           item.scale_factor,
           item_work_area,
-          item.controls);
+          item.controls,
+          snapshot.options.toolbar_style,
+          hovered_control,
+          pressed_control);
       const bool eligible = presentation.visible && snapshot.visible;
       const SIZE stack_content_size = fitted_size(
           item.image.source_width,
@@ -1575,6 +1936,7 @@ class WindowsOverlayPlatform final : public OverlayPlatform {
   std::atomic<HWND> dispatcher_window_{nullptr};
   HINSTANCE instance_ = nullptr;
   ComPtr<IWICImagingFactory> wic_factory_;
+  std::unordered_map<std::string, DecodedControlImage> control_images_;
   std::unordered_map<std::string, std::unique_ptr<WindowState>> windows_;
 };
 
