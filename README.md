@@ -72,18 +72,31 @@ renderer through a context-isolated preload; do not expose the module wholesale.
 ## Quick start
 
 ```ts
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeImage } from 'electron'
 import { overlay, windows } from '@zerob13/nativekit'
 
 await app.whenReady()
 
 const win = new BrowserWindow({ width: 800, height: 600 })
+const toolbarIcon = (path: string) =>
+  nativeImage.createFromPath(path).resize({ width: 32, height: 32 }).toDataURL()
 
 overlay.start({
-  controls: [
-    { id: 'open-panel', icon: 'panel-right-open', tooltip: 'Open panel' },
-    { id: 'close', icon: 'close', tooltip: 'Close' },
-  ],
+  toolbar: {
+    style: 'dark',
+    buttons: [
+      {
+        id: 'open-panel',
+        imageData: toolbarIcon('/absolute/path/to/open-panel.png'),
+        tooltip: 'Open panel',
+      },
+      {
+        id: 'close',
+        imageData: toolbarIcon('/absolute/path/to/close.png'),
+        tooltip: 'Close',
+      },
+    ],
+  },
 })
 overlay.attachHost({
   id: 'main',
@@ -109,6 +122,9 @@ console.log(await windows.frontmost())
 
 app.on('will-quit', () => overlay.stop())
 ```
+
+Toolbar images are transparent PNG template masks. NativeKit owns proportional
+scaling, platform colors, and hover/pressed feedback.
 
 See [API reference](docs/api-reference.md) for the complete contract and
 [architecture](docs/architecture.md) for native lifecycle and threading.

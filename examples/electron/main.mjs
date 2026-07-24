@@ -30,6 +30,15 @@ let overlayRotationTimer = null
 let overlayStarted = false
 let boundsTimer = null
 
+const toolbarIcons = {
+  openPanel:
+    'data:image/png;base64,' +
+    'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAJklEQVR42mNgGAWDEfynAh5BFpCibtSCUQtGLRixFoyWpqOAMAAAYGjIOPj83TYAAAAASUVORK5CYII=',
+  close:
+    'data:image/png;base64,' +
+    'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAATUlEQVR42mNgGAUjFvxHwrRQj6LhPxXV4tT0n0J1ZGmmyHBChlDFcHyWUM1wYiyhSdKli+F0CR6aRDDNkyhdMhnFltC1LKJJaToK6AcAAdN8hK6ggysAAAAASUVORK5CYII=',
+}
+
 function sendEvent(topic, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('nativekit:event', { topic, data })
@@ -59,14 +68,21 @@ function attachOverlayHost() {
   const windowHandle = mainWindow.getNativeWindowHandle()
   if (!overlayStarted) {
     overlay.start({
-      controls: [
-        {
-          id: 'open-panel',
-          icon: 'panel-right-open',
-          tooltip: 'Open panel',
-        },
-        { id: 'close', icon: 'close', tooltip: 'Close' },
-      ],
+      toolbar: {
+        style: 'dark',
+        buttons: [
+          {
+            id: 'open-panel',
+            imageData: toolbarIcons.openPanel,
+            tooltip: 'Open panel',
+          },
+          {
+            id: 'close',
+            imageData: toolbarIcons.close,
+            tooltip: 'Close',
+          },
+        ],
+      },
     })
     overlayStarted = true
   }

@@ -73,12 +73,19 @@ Wayland 不允许普通客户端读取其他应用窗口或全局坐标，也不
 ```ts
 import { fileURLToPath } from 'node:url'
 
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage } from 'electron'
 import { overlay } from '@zerob13/nativekit'
 
 const hostId = 'main'
 let win: BrowserWindow | null = null
 let syncTimer: NodeJS.Timeout | null = null
+
+function toolbarIcon(name: string): string {
+  return nativeImage
+    .createFromPath(fileURLToPath(new URL(`./${name}.png`, import.meta.url)))
+    .resize({ width: 32, height: 32 })
+    .toDataURL()
+}
 
 function syncOverlayHost(): void {
   if (!win || win.isDestroyed()) return
@@ -113,10 +120,21 @@ win = new BrowserWindow({
 })
 
 overlay.start({
-  controls: [
-    { id: 'open-panel', icon: 'panel-right-open', tooltip: 'Open panel' },
-    { id: 'close', icon: 'close', tooltip: 'Close' },
-  ],
+  toolbar: {
+    style: 'dark',
+    buttons: [
+      {
+        id: 'open-panel',
+        imageData: toolbarIcon('open-panel'),
+        tooltip: 'Open panel',
+      },
+      {
+        id: 'close',
+        imageData: toolbarIcon('close'),
+        tooltip: 'Close',
+      },
+    ],
+  },
 })
 syncOverlayHost()
 win.on('move', scheduleOverlayHostSync)

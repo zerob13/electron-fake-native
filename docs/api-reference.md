@@ -53,8 +53,9 @@ The user can drag a panel by its visible surface outside the controls.
 Manual placement survives host and image updates, remains inside the selected
 display's work area, and retains its original anchor-stack slot so other panels
 do not jump during a drag.
-The caller may configure up to two top-right controls. NativeKit renders their
-icons and emits the configured ID without assigning application semantics.
+The caller may configure up to two top-right toolbar buttons. NativeKit renders
+caller-provided transparent PNG template images using a fixed platform-aware
+style and emits the configured ID without assigning application semantics.
 Removing the presentation or stopping the overlay discards the manual position;
 it is not persisted across launches.
 
@@ -90,8 +91,23 @@ interface OverlayControlConfig {
   tooltip?: string
 }
 
+type OverlayToolbarStyle = 'system' | 'light' | 'dark'
+
+interface OverlayToolbarButtonConfig {
+  id: string
+  imageData: string
+  tooltip?: string
+}
+
+interface OverlayToolbarConfig {
+  style?: OverlayToolbarStyle
+  buttons?: OverlayToolbarButtonConfig[]
+}
+
 interface OverlayOptions {
+  /** Deprecated compatibility API. */
   controls?: OverlayControlConfig[]
+  toolbar?: OverlayToolbarConfig
 }
 ```
 
@@ -109,15 +125,29 @@ images are limited to 8192 pixels per dimension and 64 MiB of RGBA pixels.
 `appIconPath` is a `.app` path on macOS, a Shell-readable path on Windows, or an
 absolute `.desktop`, executable, AppImage, or file path on Linux.
 
+Toolbar button `imageData` is a transparent PNG data URL no longer than 512 KiB
+and between 1 and 256 pixels per dimension. At least one decoded pixel must have
+an alpha value below 255; an unused alpha channel or transparency chunk is not
+enough. NativeKit fits the image proportionally into the fixed
+button geometry, treats its alpha channel as a template mask, and applies the
+style foreground color; callers should not encode semantic color into the
+image. NativeKit also owns hover and pressed feedback. `system` follows AppKit
+and Win32 system button colors and uses a neutral dark X11 fallback. `light` and
+`dark` provide content-independent fixed contrast on every platform.
+
 ### Methods
 
 #### `overlay.start(options?: OverlayOptions): boolean`
 
-Start the platform renderer or replace its control configuration. Repeated
-calls are safe. Controls render in array order from left to right; at most two
-are accepted. Omitting `controls` renders no buttons. macOS and Windows display
-configured hover tooltips. The first Linux X11 renderer draws the controls but
-does not display tooltip windows.
+Start the platform renderer or replace its toolbar configuration. Repeated
+calls are safe. Buttons render in array order from left to right; at most two
+are accepted. Omitting `toolbar.buttons` renders no buttons. macOS and Windows
+display configured hover tooltips. The first Linux X11 renderer draws the
+buttons but does not display tooltip windows.
+
+`controls` remains available for the 0.6 compatibility contract and supplies
+the built-in `close` and `panel-right-open` symbols. New integrations should
+use `toolbar`; passing both `controls` and `toolbar` is rejected.
 
 #### `overlay.stop(): boolean`
 

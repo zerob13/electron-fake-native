@@ -1,6 +1,7 @@
 #include "overlay/overlay_manager.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -16,6 +17,7 @@ namespace nativekit {
 namespace {
 
 constexpr std::size_t kMaximumImageDataLength = 32 * 1024 * 1024;
+constexpr std::size_t kMaximumControlImageDataLength = 512 * 1024;
 constexpr std::uint32_t kMaximumOverlayControls = 2;
 
 AnchorEdge parse_edge(const std::string& edge) {
@@ -34,6 +36,13 @@ OverlayControlIcon parse_control_icon(const std::string& icon) {
   throw std::invalid_argument("control.icon is invalid");
 }
 
+OverlayToolbarStyle parse_toolbar_style(const std::string& style) {
+  if (style == "system") return OverlayToolbarStyle::kSystem;
+  if (style == "light") return OverlayToolbarStyle::kLight;
+  if (style == "dark") return OverlayToolbarStyle::kDark;
+  throw std::invalid_argument("toolbar.style is invalid");
+}
+
 std::string required_string(const Napi::Object& object, const char* name) {
   const Napi::Value value = object.Get(name);
   if (!value.IsString()) {
@@ -42,6 +51,73 @@ std::string required_string(const Napi::Object& object, const char* name) {
   const std::string result = value.As<Napi::String>().Utf8Value();
   if (result.empty()) {
     throw std::invalid_argument(std::string(name) + " must not be empty");
+  }
+  return result;
+}
+
+std::vector<OverlayControl> parse_controls(
+    const Napi::Value& value,
+    const char* name,
+    bool require_image_data) {
+  if (!value.IsArray()) {
+    throw std::invalid_argument(std::string(name) + " must be an array");
+  }
+  const Napi::Array controls = value.As<Napi::Array>();
+  if (controls.Length() > kMaximumOverlayControls) {
+    throw std::invalid_argument(
+        std::string(name) + " supports at most two buttons");
+  }
+
+  std::unordered_set<std::string> control_ids;
+  std::vector<OverlayControl> result;
+  result.reserve(controls.Length());
+  for (std::uint32_t index = 0; index < controls.Length(); ++index) {
+    const Napi::Value control_value = controls.Get(index);
+    if (!control_value.IsObject()) {
+      throw std::invalid_argument("toolbar button must be an object");
+    }
+    const Napi::Object control = control_value.As<Napi::Object>();
+    OverlayControl parsed;
+    parsed.id = required_string(control, "id");
+    if (!control_ids.insert(parsed.id).second) {
+      throw std::invalid_argument("toolbar button ids must be unique");
+    }
+
+    if (require_image_data) {
+      std::string image_data = required_string(control, "imageData");
+      if (image_data.size() > kMaximumControlImageDataLength) {
+        throw std::invalid_argument(
+            "toolbar button imageData exceeds the 512 KiB limit");
+      }
+      const std::size_t separator = image_data.find(',');
+      std::string header = separator == std::string::npos
+          ? image_data
+          : image_data.substr(0, separator);
+      std::transform(
+          header.begin(),
+          header.end(),
+          header.begin(),
+          [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+          });
+      if (header != "data:image/png;base64") {
+        throw std::invalid_argument(
+            "toolbar button imageData must be a PNG data URL");
+      }
+      parsed.image_data = std::move(image_data);
+    } else {
+      parsed.icon = parse_control_icon(required_string(control, "icon"));
+    }
+
+    const Napi::Value tooltip = control.Get("tooltip");
+    if (!tooltip.IsUndefined()) {
+      if (!tooltip.IsString() || tooltip.As<Napi::String>().Utf8Value().empty()) {
+        throw std::invalid_argument(
+            "toolbar button tooltip must be a non-empty string");
+      }
+      parsed.tooltip = tooltip.As<Napi::String>();
+    }
+    result.push_back(std::move(parsed));
   }
   return result;
 }
@@ -413,30 +489,29 @@ Napi::Value start(const Napi::CallbackInfo& info) {
     if (info.Length() > 0 && info[0].IsObject()) {
       const Napi::Object root = info[0].As<Napi::Object>();
       const Napi::Value controls_value = root.Get("controls");
-      if (controls_value.IsArray()) {
-        const Napi::Array controls = controls_value.As<Napi::Array>();
-        if (controls.Length() > kMaximumOverlayControls) {
-          throw std::invalid_argument(
-              "controls supports at most two controls");
+      const Napi::Value toolbar_value = root.Get("toolbar");
+      if (!controls_value.IsUndefined() && !toolbar_value.IsUndefined()) {
+        throw std::invalid_argument(
+            "options.controls and options.toolbar cannot be combined");
+      }
+      if (!toolbar_value.IsUndefined()) {
+        if (!toolbar_value.IsObject()) {
+          throw std::invalid_argument("toolbar must be an object");
         }
-        std::unordered_set<std::string> control_ids;
-        for (std::uint32_t index = 0; index < controls.Length(); ++index) {
-          const Napi::Value control_value = controls.Get(index);
-          if (!control_value.IsObject()) {
-            throw std::invalid_argument("control must be an object");
-          }
-          const Napi::Object control = control_value.As<Napi::Object>();
-          OverlayControl parsed;
-          parsed.id = required_string(control, "id");
-          if (!control_ids.insert(parsed.id).second) {
-            throw std::invalid_argument("control ids must be unique");
-          }
-          parsed.icon = parse_control_icon(required_string(control, "icon"));
-          if (control.Get("tooltip").IsString()) {
-            parsed.tooltip = control.Get("tooltip").As<Napi::String>();
-          }
-          options.controls.push_back(std::move(parsed));
+        const Napi::Object toolbar = toolbar_value.As<Napi::Object>();
+        const Napi::Value style_value = toolbar.Get("style");
+        if (!style_value.IsUndefined()) {
+          options.toolbar_style =
+              parse_toolbar_style(required_string(toolbar, "style"));
         }
+        const Napi::Value buttons_value = toolbar.Get("buttons");
+        if (!buttons_value.IsUndefined()) {
+          options.controls =
+              parse_controls(buttons_value, "toolbar.buttons", true);
+        }
+      } else if (!controls_value.IsUndefined()) {
+        options.controls =
+            parse_controls(controls_value, "controls", false);
       }
     }
     return manager.start(std::move(options));

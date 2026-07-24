@@ -6,8 +6,19 @@ import {
   apps,
   overlay,
   windows,
+  type OverlayToolbarStyle,
   type SystemWindow,
 } from '../js/index.js'
+
+const transparentPng =
+  'data:image/png;base64,' +
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII='
+const opaqueAlphaPng =
+  'data:image/png;base64,' +
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg=='
+const unusedTransparencyPng =
+  'data:image/png;base64,' +
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAAAnRSTlMAAHaTzTgAAAAKSURBVHicY2AEAAADAAJL9d3qAAAAAElFTkSuQmCC'
 
 function expectWindowShape(window: SystemWindow): void {
   expect(Number.isSafeInteger(window.id)).toBe(true)
@@ -66,6 +77,83 @@ describe('JavaScript boundary validation', () => {
     ).toThrow('options.controls ids must be unique')
   })
 
+  it('validates customizable overlay toolbars', () => {
+    expect(() =>
+      overlay.start({
+        toolbar: {
+          style: 'dark',
+          buttons: [
+            {
+              id: 'close',
+              imageData: 'data:image/jpeg;base64,AA==',
+            },
+          ],
+        },
+      }),
+    ).toThrow(
+      'options.toolbar.buttons[0].imageData must be a PNG data URL',
+    )
+    expect(() =>
+      overlay.start({
+        toolbar: {
+          style: 'dark',
+          buttons: [
+            { id: 'duplicate', imageData: transparentPng },
+            { id: 'duplicate', imageData: transparentPng },
+          ],
+        },
+      }),
+    ).toThrow('options.toolbar.buttons ids must be unique')
+    expect(() =>
+      overlay.start({
+        toolbar: {
+          buttons: [
+            { id: 'invalid', imageData: 'data:image/png;base64,AA==' },
+          ],
+        },
+      }),
+    ).toThrow('options.toolbar.buttons[0].imageData must contain PNG image data')
+    expect(() =>
+      overlay.start({
+        toolbar: {
+          buttons: [{ id: 'opaque', imageData: opaqueAlphaPng }],
+        },
+      }),
+    ).toThrow(
+      'options.toolbar.buttons[0].imageData must contain a transparent pixel',
+    )
+    expect(() =>
+      overlay.start({
+        toolbar: {
+          buttons: [
+            { id: 'unused-transparency', imageData: unusedTransparencyPng },
+          ],
+        },
+      }),
+    ).toThrow(
+      'options.toolbar.buttons[0].imageData must contain a transparent pixel',
+    )
+    expect(() =>
+      overlay.start({
+        toolbar: {
+          buttons: [
+            { id: 'tooltip', imageData: transparentPng, tooltip: '' },
+          ],
+        },
+      }),
+    ).toThrow(
+      'options.toolbar.buttons[0].tooltip must be a non-empty string',
+    )
+    expect(() =>
+      overlay.start({
+        controls: [{ id: 'close', icon: 'close' }],
+        toolbar: { style: 'system' },
+      }),
+    ).toThrow(
+      'options.controls and options.toolbar cannot be combined',
+    )
+  })
+
   it('rejects malformed overlay input before crossing N-API', () => {
     expect(() =>
       overlay.pushImage({
@@ -89,6 +177,25 @@ describe('JavaScript boundary validation', () => {
 })
 
 describe('overlay lifecycle integration', () => {
+  it('accepts every toolbar style with zero, one, or two buttons', () => {
+    const styles: OverlayToolbarStyle[] = ['system', 'light', 'dark']
+    styles.forEach((style, count) => {
+      expect(
+        overlay.start({
+          toolbar: {
+            style,
+            buttons: Array.from({ length: count }, (_, index) => ({
+              id: `${style}-${index}`,
+              imageData: transparentPng,
+              tooltip: `Button ${index + 1}`,
+            })),
+          },
+        }),
+      ).toBe(true)
+    })
+    expect(overlay.stop()).toBe(true)
+  })
+
   it('starts, reports empty state, emits size changes, and stops idempotently', async () => {
     expect(overlay.start()).toBe(true)
     expect(overlay.hasAny()).toBe(false)

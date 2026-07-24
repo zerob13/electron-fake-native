@@ -116,16 +116,21 @@ UpdateLayeredWindow(PBGRA) + HWND_TOPMOST
 ```
 
 All tails preserve image aspect ratio, size root-level panels independently of
-the host bounds, render an optional application-icon badge, scale controls,
+the host bounds, render an optional application-icon badge, scale toolbar buttons,
 skip suppressed items in stack layout, and always show the first eligible item
 before hiding stack overflow. The xwayland-satellite child-window fallback
 keeps the host size limit because the compositor clips children to that host.
 A user drag moves the native window directly without renderer IPC. The platform
 tail then owns the presentation's manual origin, clamps it to the current work
 area, and keeps its anchor-stack slot stable. Callers configure up to two
-controls by ID, icon, and tooltip; platform tails render them and return only
-the clicked ID. macOS and Windows provide native hover tooltips; the first X11
-renderer accepts the same strings but does not draw tooltip windows.
+toolbar buttons by ID, transparent PNG template image, and tooltip. The
+`system`, `light`, and `dark` style presets keep layout, proportional icon
+scaling, contrast, hover, and pressed feedback owned by NativeKit while platform
+tails retain their native button geometry. The 0.6 built-in control icons remain
+as a compatibility input. Every tail
+returns only the clicked ID. macOS and Windows provide native hover tooltips;
+the first X11 renderer accepts the same strings but does not draw tooltip
+windows.
 
 Linux uses one dedicated XCB event thread and one undecorated, non-focusing
 utility window per presentation. XCB RandR selects the host monitor; EWMH

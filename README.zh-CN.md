@@ -51,18 +51,31 @@ Linux 预编译文件会动态链接 GLib/GIO、GdkPixbuf、XCB 与 XCB RandR。
 ## 最小示例
 
 ```ts
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeImage } from 'electron'
 import { overlay, windows } from '@zerob13/nativekit'
 
 await app.whenReady()
 
 const win = new BrowserWindow({ width: 800, height: 600 })
+const toolbarIcon = (path: string) =>
+  nativeImage.createFromPath(path).resize({ width: 32, height: 32 }).toDataURL()
 
 overlay.start({
-  controls: [
-    { id: 'open-panel', icon: 'panel-right-open', tooltip: 'Open panel' },
-    { id: 'close', icon: 'close', tooltip: 'Close' },
-  ],
+  toolbar: {
+    style: 'dark',
+    buttons: [
+      {
+        id: 'open-panel',
+        imageData: toolbarIcon('/absolute/path/to/open-panel.png'),
+        tooltip: 'Open panel',
+      },
+      {
+        id: 'close',
+        imageData: toolbarIcon('/absolute/path/to/close.png'),
+        tooltip: 'Close',
+      },
+    ],
+  },
 })
 overlay.attachHost({
   id: 'main',
@@ -90,9 +103,10 @@ app.on('will-quit', () => overlay.stop())
 ```
 
 用户可以直接按住 Overlay 图片的可见区域拖动。手动位置会在 host 和图片更新时保留，
-并被限制在当前显示器工作区内。顶部按钮由调用方配置，点击后通过 `control` 事件
-原样返回对应 `id`；双击图片会触发 `activate`。位置只保留到 presentation 被删除
-或 `overlay.stop()`，不会跨应用启动持久化。
+并被限制在当前显示器工作区内。顶部 toolbar 提供 `system`、`light`、`dark` 三种固定
+样式；按钮图片由调用方传入透明 PNG，NativeKit 负责等比缩放、模板着色以及 hover/pressed
+反馈。点击后通过 `control` 事件原样返回对应 `id`；双击图片会触发 `activate`。位置只保留到
+presentation 被删除或 `overlay.stop()`，不会跨应用启动持久化。
 
 ## Electron demo
 

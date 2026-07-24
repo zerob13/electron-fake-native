@@ -49,16 +49,119 @@ NSString* ns_string(const std::string& value) {
   return [NSString stringWithUTF8String:value.c_str()] ?: @"";
 }
 
-NSImage* control_image(nativekit::OverlayControlIcon icon) {
-  switch (icon) {
-    case nativekit::OverlayControlIcon::kClose:
-      return [NSImage imageWithSystemSymbolName:@"xmark"
-                      accessibilityDescription:@"Close"];
-    case nativekit::OverlayControlIcon::kPanelRightOpen:
-      return [NSImage imageWithSystemSymbolName:@"sidebar.right"
-                      accessibilityDescription:@"Open right panel"];
+bool has_transparent_pixel(
+    NSImage* image,
+    NSInteger width,
+    NSInteger height) {
+  NSBitmapImageRep* bitmap = [[NSBitmapImageRep alloc]
+      initWithBitmapDataPlanes:nullptr
+                    pixelsWide:width
+                    pixelsHigh:height
+                 bitsPerSample:8
+               samplesPerPixel:4
+                      hasAlpha:YES
+                      isPlanar:NO
+                colorSpaceName:NSCalibratedRGBColorSpace
+                   bytesPerRow:0
+                  bitsPerPixel:0];
+  if (bitmap == nil) return false;
+  [NSGraphicsContext saveGraphicsState];
+  NSGraphicsContext.currentContext =
+      [NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap];
+  [image drawInRect:NSMakeRect(0, 0, width, height)
+           fromRect:NSZeroRect
+          operation:NSCompositingOperationCopy
+           fraction:1
+     respectFlipped:NO
+              hints:@{NSImageHintInterpolation : @(NSImageInterpolationNone)}];
+  [NSGraphicsContext restoreGraphicsState];
+
+  NSUInteger pixel[4]{};
+  for (NSInteger y = 0; y < height; ++y) {
+    for (NSInteger x = 0; x < width; ++x) {
+      [bitmap getPixel:pixel atX:x y:y];
+      if (pixel[3] < 255) return true;
+    }
   }
-  return nil;
+  return false;
+}
+
+NSImage* control_image(const nativekit::OverlayControl& control) {
+  NSImage* image = nil;
+  if (control.image_data) {
+    image =
+        nativekit::platform::image_from_data_url(*control.image_data);
+  } else {
+    switch (control.icon) {
+    case nativekit::OverlayControlIcon::kClose:
+      image = [NSImage imageWithSystemSymbolName:@"xmark"
+                       accessibilityDescription:@"Close"];
+      break;
+    case nativekit::OverlayControlIcon::kPanelRightOpen:
+      image = [NSImage imageWithSystemSymbolName:@"sidebar.right"
+                       accessibilityDescription:@"Open right panel"];
+      break;
+    }
+  }
+  if (image == nil) {
+    throw std::runtime_error(
+        "overlay toolbar button image could not be decoded");
+  }
+  NSInteger source_width = 1;
+  NSInteger source_height = 1;
+  NSInteger source_area = 0;
+  for (NSImageRep* representation in image.representations) {
+    if (representation.pixelsWide > 256 ||
+        representation.pixelsHigh > 256) {
+      throw std::runtime_error(
+          "overlay toolbar button image dimensions exceed 256 pixels");
+    }
+    const NSInteger area =
+        representation.pixelsWide * representation.pixelsHigh;
+    if (area > source_area) {
+      source_width = representation.pixelsWide;
+      source_height = representation.pixelsHigh;
+      source_area = area;
+    }
+  }
+  if (control.image_data &&
+      !has_transparent_pixel(image, source_width, source_height)) {
+    throw std::runtime_error(
+        "overlay toolbar button image must contain a transparent pixel");
+  }
+  constexpr CGFloat maximum_size = 15;
+  const CGFloat scale = std::min(
+      maximum_size / std::max<CGFloat>(source_width, 1),
+      maximum_size / std::max<CGFloat>(source_height, 1));
+  [image setTemplate:YES];
+  image.size = NSMakeSize(
+      std::max<CGFloat>(1, source_width * scale),
+      std::max<CGFloat>(1, source_height * scale));
+  return image;
+}
+
+NSColor* control_background(nativekit::OverlayToolbarStyle style) {
+  switch (style) {
+    case nativekit::OverlayToolbarStyle::kLight:
+      return [NSColor colorWithWhite:0.98 alpha:0.92];
+    case nativekit::OverlayToolbarStyle::kDark:
+      return [NSColor colorWithWhite:0.08 alpha:0.82];
+    case nativekit::OverlayToolbarStyle::kSystem:
+      return [NSColor.controlBackgroundColor colorWithAlphaComponent:0.92];
+  }
+  return NSColor.controlBackgroundColor;
+}
+
+NSColor* control_foreground(nativekit::OverlayToolbarStyle style) {
+  switch (style) {
+    case nativekit::OverlayToolbarStyle::kLight:
+      return [NSColor colorWithWhite:0.08 alpha:1];
+    case nativekit::OverlayToolbarStyle::kDark:
+      return NSColor.whiteColor;
+    case nativekit::OverlayToolbarStyle::kSystem:
+      return NSColor.labelColor;
+  }
+  return NSColor.labelColor;
 }
 
 bool controls_equal(
@@ -68,6 +171,7 @@ bool controls_equal(
   for (std::size_t index = 0; index < first.size(); ++index) {
     if (first[index].id != second[index].id ||
         first[index].icon != second[index].icon ||
+        first[index].image_data != second[index].image_data ||
         first[index].tooltip != second[index].tooltip) {
       return false;
     }
@@ -98,7 +202,8 @@ bool controls_equal(
 - (void)setContentImage:(NSImage*)image
                iconPath:(NSString*)iconPath;
 - (void)setControls:
-    (const std::vector<nativekit::OverlayControl>&)controls;
+            (const std::vector<nativekit::OverlayControl>&)controls
+                style:(nativekit::OverlayToolbarStyle)style;
 @end
 
 @implementation NativekitOverlayView {
@@ -106,6 +211,7 @@ bool controls_equal(
   NSImageView* icon_view_;
   NSMutableArray<NSButton*>* control_buttons_;
   std::vector<nativekit::OverlayControl> controls_;
+  nativekit::OverlayToolbarStyle toolbar_style_;
   std::function<void()> activate_;
   std::function<void(const std::string&)> control_;
   std::function<void(NSRect)> moved_;
@@ -141,6 +247,7 @@ bool controls_equal(
   [self addSubview:icon_view_];
 
   control_buttons_ = [[NSMutableArray alloc] init];
+  toolbar_style_ = nativekit::OverlayToolbarStyle::kSystem;
 
   return self;
 }
@@ -198,7 +305,7 @@ bool controls_equal(
 - (void)layout {
   [super layout];
   image_view_.frame = self.bounds;
-  constexpr CGFloat button_size = 26;
+  constexpr CGFloat button_size = 30;
   constexpr CGFloat margin = 8;
   constexpr CGFloat gap = 6;
   CGFloat x = NSMaxX(self.bounds) - margin - button_size;
@@ -224,23 +331,27 @@ bool controls_equal(
 }
 
 - (void)setControls:
-    (const std::vector<nativekit::OverlayControl>&)controls {
-  if (controls_equal(controls_, controls)) return;
+            (const std::vector<nativekit::OverlayControl>&)controls
+                style:(nativekit::OverlayToolbarStyle)style {
+  if (toolbar_style_ == style && controls_equal(controls_, controls)) return;
   for (NSButton* button in control_buttons_) [button removeFromSuperview];
   [control_buttons_ removeAllObjects];
   controls_ = controls;
+  toolbar_style_ = style;
 
   for (std::size_t index = 0; index < controls_.size(); ++index) {
     const auto& control = controls_[index];
     NSButton* button = [NSButton
-        buttonWithImage:control_image(control.icon)
+        buttonWithImage:control_image(control)
                  target:self
                  action:@selector(controlOverlay:)];
     button.tag = static_cast<NSInteger>(index);
     button.bezelStyle = NSBezelStyleCircular;
     button.bordered = YES;
     button.focusRingType = NSFocusRingTypeNone;
-    button.contentTintColor = NSColor.labelColor;
+    button.bezelColor = control_background(style);
+    button.contentTintColor = control_foreground(style);
+    button.imageScaling = NSImageScaleProportionallyDown;
     button.toolTip = ns_string(control.tooltip);
     button.accessibilityLabel = control.tooltip.empty()
         ? ns_string(control.id)
@@ -418,7 +529,8 @@ class MacOverlayPlatform final : public OverlayPlatform {
                                 : nil;
       [view setContentImage:image
                    iconPath:icon_path];
-      [view setControls:snapshot.options.controls];
+      [view setControls:snapshot.options.controls
+                  style:snapshot.options.toolbar_style];
       panel.title = ns_string(host->second.title);
 
       const NSSize size = fitted_size(
