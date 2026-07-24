@@ -417,25 +417,22 @@ ToolbarPalette toolbar_palette(
     if (state == ToolbarButtonState::kPressed) {
       return {224, 224, 224, 250, 20, 20, 20, 255};
     }
-    return {
-        250,
-        250,
-        250,
-        state == ToolbarButtonState::kHovered ? 250 : 225,
-        20,
-        20,
-        20,
-        255,
-    };
+    const std::uint8_t background_alpha =
+        state == ToolbarButtonState::kHovered ? 250 : 225;
+    return {250, 250, 250, background_alpha, 20, 20, 20, 255};
   }
   if (state == ToolbarButtonState::kPressed) {
     return {4, 4, 4, 250, 255, 255, 255, 255};
   }
+  const std::uint8_t background =
+      state == ToolbarButtonState::kHovered ? 44 : 20;
+  const std::uint8_t background_alpha =
+      state == ToolbarButtonState::kHovered ? 245 : 215;
   return {
-      state == ToolbarButtonState::kHovered ? 44 : 20,
-      state == ToolbarButtonState::kHovered ? 44 : 20,
-      state == ToolbarButtonState::kHovered ? 44 : 20,
-      state == ToolbarButtonState::kHovered ? 245 : 215,
+      background,
+      background,
+      background,
+      background_alpha,
       255,
       255,
       255,

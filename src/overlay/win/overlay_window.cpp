@@ -265,26 +265,23 @@ ToolbarPalette toolbar_palette(
     if (state == ToolbarButtonState::kPressed) {
       return {224, 224, 224, 250, 20, 20, 20, 255};
     }
-    return {
-        250,
-        250,
-        250,
-        state == ToolbarButtonState::kHovered ? 250 : 225,
-        20,
-        20,
-        20,
-        255,
-    };
+    const BYTE background_alpha =
+        state == ToolbarButtonState::kHovered ? 250 : 225;
+    return {250, 250, 250, background_alpha, 20, 20, 20, 255};
   }
   if (style == OverlayToolbarStyle::kDark) {
     if (state == ToolbarButtonState::kPressed) {
       return {4, 4, 4, 250, 255, 255, 255, 255};
     }
+    const BYTE background =
+        state == ToolbarButtonState::kHovered ? 44 : 20;
+    const BYTE background_alpha =
+        state == ToolbarButtonState::kHovered ? 245 : 215;
     return {
-        state == ToolbarButtonState::kHovered ? 44 : 20,
-        state == ToolbarButtonState::kHovered ? 44 : 20,
-        state == ToolbarButtonState::kHovered ? 44 : 20,
-        state == ToolbarButtonState::kHovered ? 245 : 215,
+        background,
+        background,
+        background,
+        background_alpha,
         255,
         255,
         255,
@@ -297,11 +294,13 @@ ToolbarPalette toolbar_palette(
   const COLORREF foreground = state == ToolbarButtonState::kPressed
       ? GetSysColor(COLOR_HIGHLIGHTTEXT)
       : GetSysColor(COLOR_BTNTEXT);
+  const BYTE background_alpha =
+      state == ToolbarButtonState::kHovered ? 250 : 225;
   return {
       GetRValue(background),
       GetGValue(background),
       GetBValue(background),
-      state == ToolbarButtonState::kHovered ? 250 : 225,
+      background_alpha,
       GetRValue(foreground),
       GetGValue(foreground),
       GetBValue(foreground),
